@@ -26,10 +26,10 @@ eventlet==0.33.3                 # Async networking
 # =====================================
 # 🔧 HARDWARE (Ortam Bazlı)
 # =====================================
-# Raspberry Pi donanımı (sadece ARM Linux'ta)
-RPi.GPIO==0.7.1; sys_platform == "linux" and "arm" in platform_machine.lower()
-gpiozero==1.6.2; sys_platform == "linux" and "arm" in platform_machine.lower()
-adafruit-circuitpython-motor==3.4.8; sys_platform == "linux" and "arm" in platform_machine.lower()
+# Raspberry Pi donanımı (sadece Linux'ta)
+RPi.GPIO==0.7.1; sys_platform == "linux"
+gpiozero==1.6.2; sys_platform == "linux"
+adafruit-circuitpython-motor==3.4.8; sys_platform == "linux"
 
 # =====================================
 # 🚀 ASYNC & COMMUNICATION

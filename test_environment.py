@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 
 # Proje path'ini ekle
-PROJECT_ROOT = Path(__file__).parent.parent
+PROJECT_ROOT = Path(__file__).parent
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
 
@@ -68,12 +68,18 @@ def test_smart_requirements():
     print("=" * 40)
 
     try:
-        # Temel paketleri test et
+        # Ortam tespiti yap
+        from core.environment_manager import EnvironmentManager
+        env_manager = EnvironmentManager()
+        is_dev_container = env_manager.is_dev_container()
+        is_raspberry_pi = env_manager.is_raspberry_pi()
+
+        # Temel paketleri test et (her ortamda gerekli)
         import numpy as np
         print(f"✅ NumPy: {np.__version__}")
 
         import cv2
-        print(f"✅ OpenCV: {cv2.__version__}")
+        print(f"✅ OpenCV: {cv2.__version__ if hasattr(cv2, '__version__') else 'Versiyon bilinmiyor'}")
 
         import flask
         print(f"✅ Flask: {flask.__version__}")
@@ -82,11 +88,28 @@ def test_smart_requirements():
         print(f"✅ PyYAML: {yaml.__version__}")
 
         # Ortam bazlı paket testi
-        try:
-            import RPi.GPIO as GPIO
-            print("✅ RPi.GPIO: Mevcut (Raspberry Pi)")
-        except ImportError:
-            print("⚪ RPi.GPIO: Mevcut değil (Development ortamı)")
+        if is_dev_container:
+            # Dev container'da Raspberry Pi paketlerini test etme
+            print("⚪ RPi.GPIO: Test atlandı (Dev container ortamı)")
+            print("💡 Dev container ortamında Raspberry Pi paketleri test edilmez")
+        elif is_raspberry_pi:
+            # Raspberry Pi'da donanım paketlerini test et
+            try:
+                import RPi.GPIO as GPIO
+                print("✅ RPi.GPIO: Mevcut ve çalışıyor")
+
+                try:
+                    import gpiozero
+                    print("✅ gpiozero: Mevcut")
+                except ImportError:
+                    print("⚠️ gpiozero: Mevcut değil")
+
+            except (ImportError, RuntimeError) as e:
+                print(f"❌ RPi.GPIO: Hata - {e}")
+                return False
+        else:
+            # Diğer ortamlarda uyarı ver
+            print("⚪ RPi.GPIO: Test atlandı (Raspberry Pi değil)")
 
         return True
     except Exception as e:

@@ -17,15 +17,8 @@ echo "  ██████╗ ██████╗  █████╗ "
 echo " ██╔═══██╗██╔══██╗██╔══██╗"
 echo " ██║   ██║██████╔╝███████║"
 echo " ██║   ██║██╔══██╗██╔══██║"
-echo " ╚██████╔╝██████╔╝██║  ██    # Adımları çalıştır
-    check_requirements
-    check_system_dependencies
-    create_directories
-    check_config_files
-    setup_virtual_environment
-    install_packages
-    test_environment          # 🆕 Ortam testi eklendi
-    check_robot_status"  ╚═════╝ ╚═════╝ ╚═╝  ╚═╝"
+echo " ╚██████╔╝██████╔╝██║  ██║"
+echo "  ╚═════╝ ╚═════╝ ╚═╝  ╚═╝"
 echo -e "${NC}"
 echo -e "${GREEN}🤖 Hacı Abi'nin OBA Robot'u Başlatılıyor...${NC}"
 echo "=================================================="
@@ -96,7 +89,7 @@ check_requirements() {
 
     # Git kontrolü
     if ! command -v git &> /dev/null; then
-        echo -e "${YELLOW}⚠️ Git bulunamadı (isteğe bağlı)${NC}"
+        echo -e "${YELLOW}⚠️ Git bulunamadı \(isteğe bağlı\)${NC}"
     else
         echo -e "${GREEN}✅ Git mevcut${NC}"
     fi
@@ -111,6 +104,24 @@ check_requirements() {
 # Sistem bağımlılıklarını kontrol et ve kur
 check_system_dependencies() {
     echo -e "${BLUE}🔧 Sistem bağımlılıkları kontrol ediliyor...${NC}"
+
+    # Dev container'da atla
+    if [ -f "/.dockerenv" ] || [ -n "${CODESPACES}" ] || [ -n "${VSCODE_REMOTE_CONTAINERS}" ]; then
+        echo -e "${GREEN}✅ Dev container ortamı tespit edildi, sistem paketleri zaten mevcut${NC}"
+        return 0
+    fi
+
+    # Cache dosyası kontrolü
+    CACHE_FILE=".oba_packages_installed"
+    if [ -f "$CACHE_FILE" ]; then
+        CACHE_TIME=$(stat -c %Y "$CACHE_FILE" 2>/dev/null || echo 0)
+        CURRENT_TIME=$(date +%s)
+        # 24 saat = 86400 saniye
+        if [ $((CURRENT_TIME - CACHE_TIME)) -lt 86400 ]; then
+            echo -e "${GREEN}✅ Sistem paketleri daha önce kontrol edildi (cache)${NC}"
+            return 0
+        fi
+    fi
 
     # Gerekli sistem paketleri
     REQUIRED_PACKAGES=(
@@ -150,7 +161,7 @@ check_system_dependencies() {
             echo -e "${BLUE}🔐 Sistem paketleri kurmak için sudo yetkisi gerekli${NC}"
 
             # Kullanıcı onayı al
-            read -p "Eksik paketleri kurmak istiyor musunuz? (y/n): " -n 1 -r
+            read -p "Eksik paketleri kurmak istiyor musunuz? \(y/n\): " -n 1 -r
             echo
 
             if [[ $REPLY =~ ^[Yy]$ ]]; then
@@ -170,13 +181,16 @@ check_system_dependencies() {
                 }
 
                 echo -e "${GREEN}✅ Sistem paketleri kuruldu${NC}"
+
+                # Cache dosyası oluştur
+                touch "$CACHE_FILE"
             else
                 echo -e "${RED}❌ Sistem paketleri olmadan robot çalışmayabilir!${NC}"
                 echo -e "${YELLOW}💡 Manuel kurulum:${NC}"
                 echo "sudo apt install -y ${MISSING_PACKAGES[*]}"
 
                 # Devam etmek istiyor mu?
-                read -p "Yine de devam etmek istiyor musunuz? (y/n): " -n 1 -r
+                read -p "Yine de devam etmek istiyor musunuz? \(y/n\): " -n 1 -r
                 echo
 
                 if [[ ! $REPLY =~ ^[Yy]$ ]]; then
@@ -188,9 +202,12 @@ check_system_dependencies() {
             # Root ise direkt kur
             echo -e "${BLUE}📦 Eksik paketler kuruluyor...${NC}"
             apt update && apt install -y "${MISSING_PACKAGES[@]}"
+            touch "$CACHE_FILE"
         fi
     else
         echo -e "${GREEN}✅ Tüm sistem bağımlılıkları mevcut${NC}"
+        # Cache dosyası oluştur
+        touch "$CACHE_FILE"
     fi
 }
 
@@ -260,13 +277,28 @@ setup_virtual_environment() {
     echo -e "${GREEN}✅ Virtual environment hazır${NC}"
 }
 
-# Paket kurulumu
+# Paket kurulumu (akıllı cache ile)
 install_packages() {
     echo -e "${BLUE}📦 Python paketleri kontrol ediliyor...${NC}"
 
     if [ ! -f "requirements.txt" ]; then
         echo -e "${RED}❌ requirements.txt bulunamadı!${NC}"
         exit 1
+    fi
+
+    # Paket cache kontrolü
+    PACKAGES_CACHE_FILE=".oba_packages_cache"
+    REQ_HASH=$(md5sum requirements.txt 2>/dev/null | cut -d' ' -f1 || echo "no_hash")
+
+    # Cache'te aynı requirements.txt var mı?
+    if [ -f "$PACKAGES_CACHE_FILE" ]; then
+        CACHED_HASH=$(cat "$PACKAGES_CACHE_FILE" 2>/dev/null || echo "no_cached_hash")
+        if [ "$REQ_HASH" = "$CACHED_HASH" ]; then
+            echo -e "${GREEN}✅ Python paketleri zaten kurulu (cache: $(echo $REQ_HASH | cut -c1-8)...)${NC}"
+            return 0
+        else
+            echo -e "${YELLOW}⚠️ requirements.txt değişmiş, yeniden kurulum yapılacak${NC}"
+        fi
     fi
 
     echo -e "${BLUE}📦 Gerekli paketler kuruluyor...${NC}"
@@ -276,7 +308,17 @@ install_packages() {
         echo -e "${YELLOW}⚠️ wheel kurulamadı, devam ediliyor...${NC}"
     }
 
-    # Ana paketleri kur
+    # Ana paketleri kur - önce sessiz dene
+    echo -e "${BLUE}📦 Paketler kuruluyor (sessiz mod)...${NC}"
+    if pip install -r requirements.txt --quiet; then
+        echo -e "${GREEN}✅ Paketler başarıyla kuruldu${NC}"
+        # Cache'e hash kaydet
+        echo "$REQ_HASH" > "$PACKAGES_CACHE_FILE"
+        return 0
+    fi
+
+    # Sessiz kurulum başarısız, verbose dene
+    echo -e "${YELLOW}⚠️ Sessiz kurulum başarısız, detaylı kurulum deneniyor...${NC}"
     pip install -r requirements.txt --verbose || {
         echo -e "${RED}❌ Paket kurulumu başarısız!${NC}"
         echo -e "${YELLOW}💡 Çözüm önerileri:${NC}"
@@ -302,6 +344,8 @@ install_packages() {
         }
     }
 
+    # Başarılı kurulum sonrası cache'e kaydet
+    echo "$REQ_HASH" > "$PACKAGES_CACHE_FILE"
     echo -e "${GREEN}✅ Paketler hazır${NC}"
 }
 
@@ -314,7 +358,7 @@ check_robot_status() {
         OLD_PID=$(cat logs/robot.pid)
         if ps -p "$OLD_PID" > /dev/null 2>&1; then
             echo -e "${YELLOW}⚠️ Robot zaten çalışıyor! PID: $OLD_PID${NC}"
-            read -p "Yeniden başlatmak istiyor musunuz? (y/n): " -n 1 -r
+            read -p "Yeniden başlatmak istiyor musunuz? \(y/n\): " -n 1 -r
             echo
             if [[ $REPLY =~ ^[Yy]$ ]]; then
                 echo -e "${BLUE}🔄 Mevcut robot durduruluyor...${NC}"
@@ -340,7 +384,7 @@ test_environment() {
     # Environment test script'i çalıştır
     python3 test_environment.py --quiet || {
         echo -e "${YELLOW}⚠️ Ortam testleri başarısız, devam etmek istiyor musunuz?${NC}"
-        read -p "(y/n): " -n 1 -r
+        read -p "\(y/n\): " -n 1 -r
         echo
         if [[ ! $REPLY =~ ^[Yy]$ ]]; then
             echo -e "${GREEN}👋 İptal edildi${NC}"
@@ -398,7 +442,7 @@ main() {
     END_TIME=$(date +%s)
     PREP_TIME=$((END_TIME - START_TIME))
 
-    echo -e "${GREEN}✅ Hazırlık tamamlandı! ($PREP_TIME saniye)${NC}"
+    echo -e "${GREEN}✅ Hazırlık tamamlandı! \($PREP_TIME saniye\)${NC}"
     echo ""
 
     # Robot'u başlat

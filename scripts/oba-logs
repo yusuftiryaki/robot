@@ -1,11 +1,11 @@
 #!/bin/bash
 # -*- coding: utf-8 -*-
-"""
-Otonom Bahçe Asistanı (OBA) - Log Görüntüleme Scripti
-===========================================
-
-Bu script log dosyalarını farklı modlarda görüntüler.
-"""
+#
+# Otonom Bahçe Asistanı (OBA) - Log Görüntüleme Scripti
+# ===========================================
+#
+# Bu script log dosyalarını farklı modlarda görüntüler.
+#
 
 # Proje ana dizinine git
 cd "$(dirname "$0")/.."
@@ -137,10 +137,10 @@ show_logs_with_filter() {
     local pattern="$1"
     local files="$2"
     local description="$3"
-    
+
     echo -e "${CYAN}$description${NC}"
     echo "$(printf '=%.0s' {1..40})"
-    
+
     if $FOLLOW; then
         echo "📡 Canlı takip aktif - Çıkmak için Ctrl+C"
         echo ""
@@ -172,7 +172,7 @@ show_logs_with_filter() {
 show_all_logs() {
     echo -e "${CYAN}📊 TÜM LOGLAR (Son $LINES satır)${NC}"
     echo "================================"
-    
+
     if $FOLLOW; then
         echo "📡 Canlı takip aktif - Çıkmak için Ctrl+C"
         echo ""
@@ -185,7 +185,7 @@ show_all_logs() {
                 all_logs="$all_logs $log_file"
             fi
         done
-        
+
         if [[ -n "$all_logs" ]]; then
             tail -n $LINES $all_logs | sort | while IFS= read -r line; do
                 # Renk kodlaması
@@ -212,7 +212,7 @@ show_today_logs() {
     local today=$(date +%Y-%m-%d)
     echo -e "${CYAN}📅 BUGÜNKÜ LOGLAR ($today)${NC}"
     echo "================================="
-    
+
     local today_logs=""
     for log_file in logs/*.log; do
         if [[ -f "$log_file" ]]; then
@@ -222,7 +222,7 @@ show_today_logs() {
             fi
         fi
     done
-    
+
     if [[ -n "$today_logs" ]]; then
         if $FOLLOW; then
             echo "📡 Canlı takip aktif - Çıkmak için Ctrl+C"
@@ -308,27 +308,27 @@ esac
 if [[ ! $FOLLOW ]]; then
     echo -e "${CYAN}📊 LOG İSTATİSTİKLERİ${NC}"
     echo "===================="
-    
+
     # Toplam log sayısı
     local total_lines=$(cat logs/*.log 2>/dev/null | wc -l)
     echo "📝 Toplam log satırı: $total_lines"
-    
+
     # Hata sayısı
     local error_count=$(grep -i "error\|exception\|critical" logs/*.log 2>/dev/null | wc -l)
     echo "🚨 Toplam hata sayısı: $error_count"
-    
+
     # Uyarı sayısı
     local warning_count=$(grep -i "warning\|warn" logs/*.log 2>/dev/null | wc -l)
     echo "⚠️ Toplam uyarı sayısı: $warning_count"
-    
+
     # En büyük log dosyası
     local largest_log=$(ls -lS logs/*.log 2>/dev/null | head -1 | awk '{print $9, $5}')
     if [[ -n "$largest_log" ]]; then
         echo "📁 En büyük log: $largest_log bytes"
     fi
-    
+
     echo ""
-    
+
     # Yararlı komutlar
     echo -e "${CYAN}💡 YARALI KOMUTLAR:${NC}"
     echo "  oba-logs follow           Canlı log takibi"

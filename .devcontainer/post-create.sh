@@ -2,7 +2,14 @@
 
 echo "🤖 Hacı Abi'nin Bahçe Robotu Development Environment Kuruluyor..."
 
-# Python paketlerini yükle
+# Python paketecho "✅ OBA Helper Scripts yüklendi!"
+echo "   oba-help    - Yardım ve komut listesi"
+echo "   oba-start   - Robot başlat"
+echo "   oba-stop    - Robot durdur"
+echo "   oba-test    - Test suite çalıştır"
+echo "   oba-status  - Robot durumu kontrol"
+echo "   oba-logs    - Log dosyalarını görüntüle"
+echo "   oba-clean   - Geçici dosyaları temizle"yükle
 pip install --upgrade pip
 
 # Requirements.txt'ten paketleri yükle (tek kaynak, düzenli yaklaşım)
@@ -78,6 +85,7 @@ echo "" >> ~/.bashrc
 echo "# OBA Robot Helper Scripts" >> ~/.bashrc
 echo "alias oba-help='/workspaces/oba/scripts/oba-help'" >> ~/.bashrc
 echo "alias oba-start='/workspaces/oba/scripts/oba-start'" >> ~/.bashrc
+echo "alias oba-stop='/workspaces/oba/scripts/oba-stop'" >> ~/.bashrc
 echo "alias oba-test='/workspaces/oba/scripts/oba-test'" >> ~/.bashrc
 echo "alias oba-status='/workspaces/oba/scripts/oba-status'" >> ~/.bashrc
 echo "alias oba-logs='/workspaces/oba/scripts/oba-logs'" >> ~/.bashrc
@@ -88,6 +96,7 @@ echo "" >> ~/.zshrc
 echo "# OBA Robot Helper Scripts" >> ~/.zshrc
 echo "alias oba-help='/workspaces/oba/scripts/oba-help'" >> ~/.zshrc
 echo "alias oba-start='/workspaces/oba/scripts/oba-start'" >> ~/.zshrc
+echo "alias oba-stop='/workspaces/oba/scripts/oba-stop'" >> ~/.zshrc
 echo "alias oba-test='/workspaces/oba/scripts/oba-test'" >> ~/.zshrc
 echo "alias oba-status='/workspaces/oba/scripts/oba-status'" >> ~/.zshrc
 echo "alias oba-logs='/workspaces/oba/scripts/oba-logs'" >> ~/.zshrc
@@ -108,6 +117,7 @@ echo "   oba-clean   - Geçici dosyaları temizle"
 echo "🎉 Development environment hazır! Hacı Abi işi bitirdi."
 echo "📝 Şu komutları terminalde kullanabilirsiniz:"
 echo "   oba-help              # Tüm komutları göster"
-echo "   oba-start sim debug   # Simülasyon modunda başlat"
+echo "   oba-start --sim --debug # Simülasyon modunda başlat"
+echo "   oba-stop              # Robotu durdur"
 echo "   oba-test              # Testleri çalıştır"
 echo "   oba-status            # Durum kontrol"

@@ -91,6 +91,11 @@ class RobotUygulama:
         logger.info(f"Çıkış sinyali alındı: {signum}")
         self.calisma_durumu = False
 
+        # Robot'un da ana döngüsünü durdur
+        if self.robot:
+            self.robot.calisma_durumu = False
+            logger.info("🤖 Robot ana döngüsü durduruldu")
+
     async def robot_baslatma_kontrolu(self) -> bool:
         """
         Robotun başlatılmadan önce gerekli kontrolleri yap.
@@ -219,13 +224,16 @@ class RobotUygulama:
             logger.info("🔄 Robot ana döngüsü başladı")
 
             if self.robot:
-                # Robot'un kendi ana_dongu() metodunu çağır
+                # Robot'un ana döngüsünü başlat
+                # Ana döngü kendi calisma_durumu kontrolü yapıyor
                 await self.robot.ana_dongu()
             else:
                 logger.warning("Robot nesnesi bulunamadı!")
 
             logger.info("🛑 Robot ana döngüsü sonlandı")
 
+        except asyncio.CancelledError:
+            logger.info("🛑 Robot ana döngüsü iptal edildi")
         except Exception as e:
             logger.error(f"Robot ana döngüsünde kritik hata: {e}")
             if self.robot:

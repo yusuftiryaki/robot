@@ -407,3 +407,16 @@ class EnvironmentManager:
         print(f"🐛 Debug: {config['debug']}")
         print(f"🌐 Web Port: {config['web_interface']['port']}")
         print(f"📊 Log Level: {config['logging']['level']}")
+
+    # Public wrapper metodlar
+    def is_dev_container(self) -> bool:
+        """Dev Container ortamında mı?"""
+        return self._env_type == EnvironmentType.DEV_CONTAINER
+
+    def is_raspberry_pi(self) -> bool:
+        """Raspberry Pi ortamında mı?"""
+        return self._env_type == EnvironmentType.RASPBERRY_PI
+
+    def is_docker(self) -> bool:
+        """Docker ortamında mı?"""
+        return self._env_type == EnvironmentType.DOCKER

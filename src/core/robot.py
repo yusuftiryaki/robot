@@ -101,35 +101,82 @@ class BahceRobotu:
 
     def _init_subsystems(self):
         """Alt sistemleri başlat"""
-        try:
-            self.logger.info("🔧 Alt sistemler başlatılıyor...")
+        self.logger.info("🔧 Alt sistemler başlatılıyor...")
 
-            # Hardware
+        # Hardware - güvenli başlatma
+        try:
             self.motor_kontrolcu = MotorKontrolcu(
                 self.config.get("hardware", {}).get("motors", {}))
+            self.logger.info("✅ Motor kontrolcü hazır")
+        except Exception as e:
+            self.logger.error(f"❌ Motor kontrolcü hatası: {e}")
+            self.motor_kontrolcu = None
+
+        try:
             self.sensor_okuyucu = SensorOkuyucu(
                 self.config.get("hardware", {}).get("sensors", {}))
+            self.logger.info("✅ Sensör okuyucu hazır")
+        except Exception as e:
+            self.logger.error(f"❌ Sensör okuyucu hatası: {e}")
+            self.sensor_okuyucu = None
 
-            # Navigation
+        # Navigation - güvenli başlatma
+        try:
             self.konum_takipci = KonumTakipci(
                 self.config.get("navigation", {}))
+            self.logger.info("✅ Konum takipçi hazır")
+        except Exception as e:
+            self.logger.error(f"❌ Konum takipçi hatası: {e}")
+            self.konum_takipci = None
+
+        try:
             self.rota_planlayici = RotaPlanlayici(
                 self.config.get("navigation", {}))
+            self.logger.info("✅ Rota planlayıcı hazır")
+        except Exception as e:
+            self.logger.error(f"❌ Rota planlayıcı hatası: {e}")
+            self.rota_planlayici = None
 
-            # Vision & AI
+        # Vision & AI - güvenli başlatma
+        try:
             self.kamera_islemci = KameraIslemci(self.config.get(
                 "hardware", {}).get("sensors", {}).get("camera", {}))
-            self.karar_verici = KararVerici(self.config.get("ai", {}))
+            self.logger.info("✅ Kamera işlemci hazır")
+        except Exception as e:
+            self.logger.error(f"❌ Kamera işlemci hatası: {e}")
+            self.kamera_islemci = None
 
-            # Security
+        try:
+            self.karar_verici = KararVerici(self.config.get("ai", {}))
+            self.logger.info("✅ Karar verici hazır")
+        except Exception as e:
+            self.logger.error(f"❌ Karar verici hatası: {e}")
+            self.karar_verici = None
+
+        # Security - güvenli başlatma
+        try:
             self.guvenlik_sistemi = GuvenlikSistemi(
                 self.config.get("safety", {}))
-
-            self.logger.info("✅ Tüm alt sistemler hazır!")
-
+            self.logger.info("✅ Güvenlik sistemi hazır")
         except Exception as e:
-            self.logger.error(f"❌ Alt sistem başlatma hatası: {e}")
-            self.durum = RobotDurumu.HATA
+            self.logger.error(f"❌ Güvenlik sistemi hatası: {e}")
+            self.guvenlik_sistemi = None
+
+        # Başarılı başlatılan sistem sayısı
+        active_systems = sum(1 for system in [
+            self.motor_kontrolcu, self.sensor_okuyucu, self.konum_takipci,
+            self.rota_planlayici, self.kamera_islemci, self.karar_verici,
+            self.guvenlik_sistemi
+        ] if system is not None)
+
+        self.logger.info(f"✅ {active_systems}/7 alt sistem hazır!")
+
+        # Kritik sistemler eksikse uyarı ver
+        if self.motor_kontrolcu is None or self.sensor_okuyucu is None:
+            self.logger.warning("⚠️ Kritik sistemler eksik, sınırlı mod aktif!")
+            self.durum = RobotDurumu.BEKLEME
+        else:
+            self.logger.info("🚀 Tüm kritik sistemler hazır!")
 
     async def ana_dongu(self):
         """
@@ -146,14 +193,17 @@ class BahceRobotu:
                 sensor_data = await self._sensor_verilerini_oku()
 
                 # Güvenlik kontrolü
-                guvenlik_durumu = self.guvenlik_sistemi.kontrol_et(sensor_data)
+                guvenlik_durumu = None
+                if self.guvenlik_sistemi is not None:
+                    guvenlik_durumu = self.guvenlik_sistemi.kontrol_et(sensor_data)
 
-                if guvenlik_durumu.acil_durum:
+                if guvenlik_durumu and guvenlik_durumu.acil_durum:
                     await self._acil_durum_isle(guvenlik_durumu.sebep)
                     continue
 
                 # Konum güncelle
-                await self.konum_takipci.konum_guncelle(sensor_data)
+                if self.konum_takipci is not None:
+                    await self.konum_takipci.konum_guncelle(sensor_data)
 
                 # Durum makinesine göre işlem yap
                 await self._durum_makinesini_isle(sensor_data)
@@ -161,13 +211,27 @@ class BahceRobotu:
                 # Kısa bekleme
                 await asyncio.sleep(0.1)  # 10 Hz ana döngü
 
+            except asyncio.CancelledError:
+                self.logger.info("🛑 Ana döngü iptal edildi")
+                break
             except Exception as e:
                 self.logger.error(f"❌ Ana döngü hatası: {e}")
                 await self._hata_isle(str(e))
                 await asyncio.sleep(1)
 
+        self.logger.info("🛑 Ana döngü temiz şekilde sonlandı")
+
     async def _sensor_verilerini_oku(self) -> Dict[str, Any]:
         """Tüm sensörlerden veri oku"""
+        if self.sensor_okuyucu is None:
+            # Simülasyon verisi döndür
+            return {
+                "timestamp": datetime.now().isoformat(),
+                "battery": {"voltage": 12.5, "current": 1.2, "percentage": 85},
+                "sensors": {"ultrasonic": {"distance": 50.0}, "bump": False},
+                "imu": {"roll": 0.0, "pitch": 0.0, "yaw": 0.0},
+                "gps": {"latitude": 39.9334, "longitude": 32.8597, "fix": False}
+            }
         return await self.sensor_okuyucu.tum_verileri_oku()
 
     async def _durum_makinesini_isle(self, sensor_data: Dict[str, Any]):
@@ -203,12 +267,15 @@ class BahceRobotu:
         """🏁 Robot başlatıldığında yapılan işlemler"""
         self.logger.info("🏁 Robot başlatılıyor...")
 
-        # Sistem kontrolü
-        await self.motor_kontrolcu.test_et()
-        await self.sensor_okuyucu.kalibrasyon_yap()
+        # Sistem kontrolü - None kontrolü ile güvenli çalışma
+        if self.motor_kontrolcu is not None:
+            await self.motor_kontrolcu.test_et()
+        if self.sensor_okuyucu is not None:
+            await self.sensor_okuyucu.kalibrasyon_yap()
 
         # İlk konum belirle
-        await self.konum_takipci.ilk_konum_belirle()
+        if self.konum_takipci is not None:
+            await self.konum_takipci.ilk_konum_belirle()
 
         self.durum_degistir(RobotDurumu.BEKLEME)
         self.logger.info("✅ Robot hazır! Görev bekliyor.")

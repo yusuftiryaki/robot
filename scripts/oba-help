@@ -1,11 +1,11 @@
 #!/bin/bash
 # -*- coding: utf-8 -*-
-"""
-Otonom Bahçe Asistanı (OBA) - Yardım Scripti
-==================================
-
-Bu script robotun tüm komutlarını ve kullanım örneklerini gösterir.
-"""
+#
+# Otonom Bahçe Asistanı (OBA) - Yardım Scripti
+# ==================================
+#
+# Bu script robotun tüm komutlarını ve kullanım örneklerini gösterir.
+#
 
 echo "🤖 OTONOM BAHÇE ASISTANI (OBA) - YARDIM"
 echo "=================================="
@@ -14,6 +14,7 @@ echo ""
 echo "📋 MEVCUT KOMUTLAR:"
 echo "  oba-help     Bu yardım menüsünü göster"
 echo "  oba-start    Robotu başlat (çeşitli modlarla)"
+echo "  oba-stop     Robotu durdur"
 echo "  oba-test     Test suite'lerini çalıştır"
 echo "  oba-status   Robot durumunu kontrol et"
 echo "  oba-logs     Log dosyalarını görüntüle"
@@ -22,10 +23,17 @@ echo ""
 
 echo "🚀 ROBOT BAŞLATMA ÖRNEKLERİ:"
 echo "  oba-start                    # Normal mod"
-echo "  oba-start sim                # Simülasyon modu"
-echo "  oba-start web                # Sadece web arayüzü"
-echo "  oba-start debug              # Debug modu"
-echo "  oba-start sim debug          # Simülasyon + Debug"
+echo "  oba-start --sim              # Simülasyon modu"
+echo "  oba-start --debug            # Debug modu"
+echo "  oba-start --sim --debug      # Simülasyon + Debug"
+echo "  oba-start --help             # Yardım mesajını göster"
+echo ""
+
+echo "🛑 ROBOT DURDURMA ÖRNEKLERİ:"
+echo "  oba-stop                     # Güvenli durdurma"
+echo "  oba-stop --force             # Zorla durdur"
+echo "  oba-stop --timeout 20        # 20 saniye bekle"
+echo "  oba-stop --verbose           # Detaylı çıktı"
 echo ""
 
 echo "🧪 TEST ÖRNEKLERİ:"
@@ -64,7 +72,7 @@ echo "  Test dosyaları: tests/"
 echo ""
 
 echo "🌐 WEB ARAYÜZÜ:"
-echo "  Web arayüzüne erişim: http://localhost:5000"
+echo "  Web arayüzüne erişim: http://0.0.0.0:5000"
 echo "  Mobil arayüz: http://192.168.1.xxx:5000"
 echo ""
 

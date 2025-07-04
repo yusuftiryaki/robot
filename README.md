@@ -15,7 +15,8 @@ code .
 
 # 3. Helper komutları kullan
 oba-help                     # Tüm komutları göster
-oba-start sim debug          # Simülasyon modunda test et
+oba-start --sim --debug      # Simülasyon modunda test et
+oba-stop                     # Robotu durdur
 oba-test                     # Testleri çalıştır
 oba-status                   # Sistem durumunu kontrol et
 oba-logs                     # Log dosyalarını görüntüle
@@ -171,6 +172,51 @@ python tests/test_runner.py --verbose
 - **[User Manual](docs/user_manual.md)**: Kapsamlı kullanım kılavuzu
 - **[API Dokümantasyonu](docs/api.md)**: Web API referansı
 - **[Troubleshooting](docs/troubleshooting.md)**: Sorun giderme rehberi
+
+## 🔧 Komut Satırı Araçları
+
+OBA, geliştirme ve kullanım kolaylığı için bir dizi komut satırı aracı sunar:
+
+### Ana Komutlar
+```bash
+oba-help                     # Tüm komutları ve örnekleri göster
+oba-start                    # Robotu normal modda başlat
+oba-start --sim              # Simülasyon modunda başlat
+oba-start --debug            # Debug modunda başlat
+oba-start --sim --debug      # Simülasyon + Debug modu
+oba-stop                     # Robotu güvenli bir şekilde durdur
+oba-stop --force             # Robotu zorla durdur
+oba-status                   # Robot durumunu kontrol et
+```
+
+### Test ve Geliştirme
+```bash
+oba-test                     # Tüm testleri çalıştır
+oba-test hardware            # Donanım testleri
+oba-test navigation          # Navigation testleri
+oba-test quick               # Hızlı testler
+```
+
+### Monitoring ve Bakım
+```bash
+oba-logs                     # Tüm logları göster
+oba-logs error               # Sadece hataları göster
+oba-logs follow              # Canlı log takibi
+oba-clean                    # Geçici dosyaları temizle
+oba-clean cache              # Cache dosyalarını temizle
+oba-clean all                # Tam temizlik
+```
+
+### Durum Kontrolleri
+```bash
+oba-status                   # Genel sistem durumu
+oba-status battery           # Batarya durumu
+oba-status gps               # GPS durumu
+oba-status sensors           # Sensör durumu
+oba-status network           # Ağ durumu
+```
+
+> **💡 İpucu**: Tüm komutlar `--help` parametresi ile detaylı yardım bilgilerini gösterir.
 
 ## ⚙️ Kurulum Detayları
 
