@@ -5,48 +5,11 @@ echo "🤖 Hacı Abi'nin Bahçe Robotu Development Environment Kuruluyor..."
 # Python paketlerini yükle
 pip install --upgrade pip
 
-# Temel robotik ve AI paketleri
-pip install \
-    opencv-python \
-    numpy \
-    scipy \
-    matplotlib \
-    pandas \
-    scikit-learn \
-    flask \
-    fastapi \
-    uvicorn \
-    websockets \
-    pydantic \
-    python-socketio \
-    eventlet
+# Requirements.txt'ten paketleri yükle (tek kaynak, düzenli yaklaşım)
+echo "📦 Requirements.txt'ten paketler yükleniyor..."
+pip install -r requirements.txt
 
-# Raspberry Pi simülasyon paketleri
-pip install \
-    RPi.GPIO \
-    adafruit-circuitpython-motor \
-    adafruit-circuitpython-mpu6050 \
-    adafruit-circuitpython-gps \
-    picamera2 \
-    gpiozero
-
-# OpenCV ek paketleri
-pip install opencv-contrib-python
-
-# Test ve geliştirme araçları
-pip install \
-    pytest \
-    pytest-asyncio \
-    black \
-    flake8 \
-    pylint \
-    mypy
-
-# Jupyter için
-pip install \
-    jupyter \
-    ipykernel \
-    ipywidgets
+echo "✅ Paketler yüklendi!"
 
 # Simulator data klasörünü oluştur
 mkdir -p /workspace/simulator_data
