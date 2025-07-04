@@ -1,0 +1,177 @@
+# 🤖 Otonom Bahçe Robotu - Git Ignore
+# =====================================
+# Hacı Abi'nin profesyonel .gitignore dosyası
+
+# 🐍 Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# 🧪 PyTest ve test dosyaları
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+
+# 🔧 Virtual environments
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+.venv/
+
+# 📊 Jupyter Notebook
+.ipynb_checkpoints/
+*.ipynb
+
+# 🗂 VS Code
+.vscode/
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+
+# 🌐 IDEs
+.idea/
+*.swp
+*.swo
+*~
+
+# 🗃 Sistem dosyaları
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# 📝 Log dosyaları
+logs/
+*.log
+*.log.*
+log/
+
+# 🔐 Gizli ve konfigürasyon dosyaları
+.env
+.env.local
+.env.production
+.env.test
+*.key
+*.pem
+secrets/
+
+# 🤖 Robot spesifik dosyalar
+# Simülasyon verileri
+simulator_data/
+simulation_logs/
+
+# Kalibrasyon dosyaları
+calibration_data/
+sensor_calibration/
+
+# Geçici robot dosyaları
+temp/
+tmp/
+*.tmp
+.temp/
+
+# Kamera kayıtları ve görseller
+recordings/
+camera_cache/
+*.mp4
+*.avi
+*.mov
+vision_cache/
+
+# GPS ve navigasyon cache
+gps_cache/
+navigation_cache/
+maps_cache/
+
+# Model dosyaları (büyük AI modelleri)
+models/
+*.model
+*.pkl
+*.h5
+*.pt
+*.pth
+
+# 🔧 Hardware konfigürasyonları (cihaza özel)
+hardware_config_local.yaml
+*_local.yaml
+device_specific/
+
+# 📊 Performans ve profiling
+*.prof
+profiling_data/
+
+# 🗄 Database dosyaları
+*.db
+*.sqlite
+*.sqlite3
+database/
+
+# 📦 Node.js (web arayüzü için)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# 🏗 Build artifacts
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+build/
+develop-eggs/
+dist/
+
+# 🧪 Test artifacts
+.pytest_cache/
+.coverage
+htmlcov/
+test-results/
+test_output/
+
+# 🔄 Backup dosyaları
+*.bak
+*.backup
+*~
+
+# 📈 Monitoring ve metrics
+metrics/
+monitoring_data/
+stats/
+
+# 🎯 Docker (eğer kullanılırsa)
+.docker/
+
+# 🔧 Raspberry Pi özgü
+gpio_state_backup/
+i2c_scan_results/

@@ -1,0 +1,338 @@
+#!/bin/bash
+# -*- coding: utf-8 -*-
+"""
+Otonom Bahçe Asistanı (OBA) - Log Görüntüleme Scripti
+===========================================
+
+Bu script log dosyalarını farklı modlarda görüntüler.
+"""
+
+# Proje ana dizinine git
+cd "$(dirname "$0")/.."
+
+# Renk kodları
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+PURPLE='\033[0;35m'
+CYAN='\033[0;36m'
+NC='\033[0m' # No Color
+
+# Banner
+echo -e "${CYAN}"
+echo "📝 ROBOT LOG GÖRÜNTÜLEYICI"
+echo "=========================="
+echo -e "${NC}"
+
+# Parametreleri kontrol et
+LOG_TYPE="all"
+FOLLOW=false
+LINES=50
+
+for arg in "$@"; do
+    case $arg in
+        error|err)
+            LOG_TYPE="error"
+            echo -e "${BLUE}🚨 Sadece hatalar gösterilecek${NC}"
+            ;;
+        warning|warn)
+            LOG_TYPE="warning"
+            echo -e "${BLUE}⚠️ Sadece uyarılar gösterilecek${NC}"
+            ;;
+        debug)
+            LOG_TYPE="debug"
+            echo -e "${BLUE}🔍 Debug logları gösterilecek${NC}"
+            ;;
+        battery|bat)
+            LOG_TYPE="battery"
+            echo -e "${BLUE}🔋 Batarya logları gösterilecek${NC}"
+            ;;
+        gps)
+            LOG_TYPE="gps"
+            echo -e "${BLUE}📍 GPS logları gösterilecek${NC}"
+            ;;
+        sensors|sensor)
+            LOG_TYPE="sensors"
+            echo -e "${BLUE}📡 Sensör logları gösterilecek${NC}"
+            ;;
+        navigation|nav)
+            LOG_TYPE="navigation"
+            echo -e "${BLUE}🧭 Navigation logları gösterilecek${NC}"
+            ;;
+        web)
+            LOG_TYPE="web"
+            echo -e "${BLUE}🌐 Web server logları gösterilecek${NC}"
+            ;;
+        today)
+            LOG_TYPE="today"
+            echo -e "${BLUE}📅 Bugünkü loglar gösterilecek${NC}"
+            ;;
+        follow|f)
+            FOLLOW=true
+            echo -e "${BLUE}👁️ Canlı log takibi aktif${NC}"
+            ;;
+        help|-h|--help)
+            echo "Kullanım: oba-logs [seçenekler]"
+            echo ""
+            echo "Log Tipleri:"
+            echo "  error, err        Sadece hatalar"
+            echo "  warning, warn     Sadece uyarılar"
+            echo "  debug             Debug logları"
+            echo "  battery, bat      Batarya logları"
+            echo "  gps               GPS logları"
+            echo "  sensors, sensor   Sensör logları"
+            echo "  navigation, nav   Navigation logları"
+            echo "  web               Web server logları"
+            echo "  today             Bugünkü loglar"
+            echo ""
+            echo "Seçenekler:"
+            echo "  follow, f         Canlı log takibi"
+            echo "  help              Bu yardımı göster"
+            echo ""
+            echo "Örnekler:"
+            echo "  oba-logs                  Tüm logları göster"
+            echo "  oba-logs error            Sadece hataları göster"
+            echo "  oba-logs follow           Canlı log takibi"
+            echo "  oba-logs battery follow   Batarya loglarını canlı takip"
+            exit 0
+            ;;
+        *)
+            # Satır sayısı parametresi olup olmadığını kontrol et
+            if [[ "$arg" =~ ^[0-9]+$ ]]; then
+                LINES=$arg
+                echo -e "${BLUE}📏 Son $LINES satır gösterilecek${NC}"
+            else
+                echo -e "${RED}❌ Bilinmeyen parametre: $arg${NC}"
+                echo "Yardım için: oba-logs help"
+                exit 1
+            fi
+            ;;
+    esac
+done
+
+# Log klasörü kontrolü
+if [[ ! -d "logs" ]]; then
+    echo -e "${RED}❌ Log klasörü bulunamadı!${NC}"
+    echo "Robot hiç çalıştırılmamış olabilir."
+    echo "Başlatmak için: oba-start"
+    exit 1
+fi
+
+# Mevcut log dosyalarını listele
+echo -e "${CYAN}📁 Mevcut log dosyaları:${NC}"
+ls -la logs/*.log 2>/dev/null | while read -r line; do
+    echo "  $line"
+done
+
+if [[ $(ls logs/*.log 2>/dev/null | wc -l) -eq 0 ]]; then
+    echo -e "${YELLOW}⚠️ Hiç log dosyası bulunamadı${NC}"
+    exit 1
+fi
+
+echo ""
+
+# Yardımcı fonksiyonlar
+show_logs_with_filter() {
+    local pattern="$1"
+    local files="$2"
+    local description="$3"
+    
+    echo -e "${CYAN}$description${NC}"
+    echo "$(printf '=%.0s' {1..40})"
+    
+    if $FOLLOW; then
+        echo "📡 Canlı takip aktif - Çıkmak için Ctrl+C"
+        echo ""
+        tail -f $files | grep --color=always -i "$pattern"
+    else
+        local result=$(grep -i "$pattern" $files 2>/dev/null | tail -n $LINES)
+        if [[ -n "$result" ]]; then
+            echo "$result" | while IFS= read -r line; do
+                # Renk kodlaması
+                if echo "$line" | grep -qi "error\|exception\|critical"; then
+                    echo -e "${RED}$line${NC}"
+                elif echo "$line" | grep -qi "warning\|warn"; then
+                    echo -e "${YELLOW}$line${NC}"
+                elif echo "$line" | grep -qi "debug"; then
+                    echo -e "${BLUE}$line${NC}"
+                elif echo "$line" | grep -qi "info"; then
+                    echo -e "${GREEN}$line${NC}"
+                else
+                    echo "$line"
+                fi
+            done
+        else
+            echo -e "${YELLOW}📭 Bu kategoride log bulunamadı${NC}"
+        fi
+    fi
+    echo ""
+}
+
+show_all_logs() {
+    echo -e "${CYAN}📊 TÜM LOGLAR (Son $LINES satır)${NC}"
+    echo "================================"
+    
+    if $FOLLOW; then
+        echo "📡 Canlı takip aktif - Çıkmak için Ctrl+C"
+        echo ""
+        tail -f logs/*.log 2>/dev/null
+    else
+        # Tüm log dosyalarını zaman sırasına göre birleştir
+        local all_logs=""
+        for log_file in logs/*.log; do
+            if [[ -f "$log_file" ]]; then
+                all_logs="$all_logs $log_file"
+            fi
+        done
+        
+        if [[ -n "$all_logs" ]]; then
+            tail -n $LINES $all_logs | sort | while IFS= read -r line; do
+                # Renk kodlaması
+                if echo "$line" | grep -qi "error\|exception\|critical"; then
+                    echo -e "${RED}$line${NC}"
+                elif echo "$line" | grep -qi "warning\|warn"; then
+                    echo -e "${YELLOW}$line${NC}"
+                elif echo "$line" | grep -qi "debug"; then
+                    echo -e "${BLUE}$line${NC}"
+                elif echo "$line" | grep -qi "info"; then
+                    echo -e "${GREEN}$line${NC}"
+                else
+                    echo "$line"
+                fi
+            done
+        else
+            echo -e "${YELLOW}📭 Log dosyası bulunamadı${NC}"
+        fi
+    fi
+    echo ""
+}
+
+show_today_logs() {
+    local today=$(date +%Y-%m-%d)
+    echo -e "${CYAN}📅 BUGÜNKÜ LOGLAR ($today)${NC}"
+    echo "================================="
+    
+    local today_logs=""
+    for log_file in logs/*.log; do
+        if [[ -f "$log_file" ]]; then
+            local file_date=$(date -r "$log_file" +%Y-%m-%d 2>/dev/null)
+            if [[ "$file_date" == "$today" ]]; then
+                today_logs="$today_logs $log_file"
+            fi
+        fi
+    done
+    
+    if [[ -n "$today_logs" ]]; then
+        if $FOLLOW; then
+            echo "📡 Canlı takip aktif - Çıkmak için Ctrl+C"
+            echo ""
+            tail -f $today_logs
+        else
+            cat $today_logs | tail -n $LINES | while IFS= read -r line; do
+                # Renk kodlaması
+                if echo "$line" | grep -qi "error\|exception\|critical"; then
+                    echo -e "${RED}$line${NC}"
+                elif echo "$line" | grep -qi "warning\|warn"; then
+                    echo -e "${YELLOW}$line${NC}"
+                elif echo "$line" | grep -qi "debug"; then
+                    echo -e "${BLUE}$line${NC}"
+                elif echo "$line" | grep -qi "info"; then
+                    echo -e "${GREEN}$line${NC}"
+                else
+                    echo "$line"
+                fi
+            done
+        fi
+    else
+        echo -e "${YELLOW}📭 Bugün oluşturulan log bulunamadı${NC}"
+    fi
+    echo ""
+}
+
+# Ana kontrol akışı
+case $LOG_TYPE in
+    "all")
+        show_all_logs
+        ;;
+    "error")
+        show_logs_with_filter "error\|exception\|critical" "logs/*.log" "🚨 HATA LOGLARI"
+        ;;
+    "warning")
+        show_logs_with_filter "warning\|warn" "logs/*.log" "⚠️ UYARI LOGLARI"
+        ;;
+    "debug")
+        show_logs_with_filter "debug" "logs/*.log" "🔍 DEBUG LOGLARI"
+        ;;
+    "battery")
+        if [[ -f "logs/battery.log" ]]; then
+            show_logs_with_filter ".*" "logs/battery.log" "🔋 BATARYA LOGLARI"
+        else
+            echo -e "${YELLOW}📭 Batarya log dosyası bulunamadı${NC}"
+        fi
+        ;;
+    "gps")
+        if [[ -f "logs/gps.log" ]]; then
+            show_logs_with_filter ".*" "logs/gps.log" "📍 GPS LOGLARI"
+        else
+            echo -e "${YELLOW}📭 GPS log dosyası bulunamadı${NC}"
+        fi
+        ;;
+    "sensors")
+        if [[ -f "logs/sensors.log" ]]; then
+            show_logs_with_filter ".*" "logs/sensors.log" "📡 SENSÖR LOGLARI"
+        else
+            echo -e "${YELLOW}📭 Sensör log dosyası bulunamadı${NC}"
+        fi
+        ;;
+    "navigation")
+        if [[ -f "logs/navigation.log" ]]; then
+            show_logs_with_filter ".*" "logs/navigation.log" "🧭 NAVİGASYON LOGLARI"
+        else
+            echo -e "${YELLOW}📭 Navigation log dosyası bulunamadı${NC}"
+        fi
+        ;;
+    "web")
+        if [[ -f "logs/web.log" ]]; then
+            show_logs_with_filter ".*" "logs/web.log" "🌐 WEB SERVER LOGLARI"
+        else
+            echo -e "${YELLOW}📭 Web server log dosyası bulunamadı${NC}"
+        fi
+        ;;
+    "today")
+        show_today_logs
+        ;;
+esac
+
+# İstatistikler
+if [[ ! $FOLLOW ]]; then
+    echo -e "${CYAN}📊 LOG İSTATİSTİKLERİ${NC}"
+    echo "===================="
+    
+    # Toplam log sayısı
+    local total_lines=$(cat logs/*.log 2>/dev/null | wc -l)
+    echo "📝 Toplam log satırı: $total_lines"
+    
+    # Hata sayısı
+    local error_count=$(grep -i "error\|exception\|critical" logs/*.log 2>/dev/null | wc -l)
+    echo "🚨 Toplam hata sayısı: $error_count"
+    
+    # Uyarı sayısı
+    local warning_count=$(grep -i "warning\|warn" logs/*.log 2>/dev/null | wc -l)
+    echo "⚠️ Toplam uyarı sayısı: $warning_count"
+    
+    # En büyük log dosyası
+    local largest_log=$(ls -lS logs/*.log 2>/dev/null | head -1 | awk '{print $9, $5}')
+    if [[ -n "$largest_log" ]]; then
+        echo "📁 En büyük log: $largest_log bytes"
+    fi
+    
+    echo ""
+    
+    # Yararlı komutlar
+    echo -e "${CYAN}💡 YARALI KOMUTLAR:${NC}"
+    echo "  oba-logs follow           Canlı log takibi"
+    echo "  oba-logs error            Sadece hataları göster"
+    echo "  oba-logs 100              Son 100 satırı göster"
+    echo "  oba-clean logs            Eski logları temizle"
+fi

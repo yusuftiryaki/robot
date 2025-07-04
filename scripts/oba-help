@@ -1,0 +1,83 @@
+#!/bin/bash
+# -*- coding: utf-8 -*-
+"""
+Otonom Bahçe Asistanı (OBA) - Yardım Scripti
+==================================
+
+Bu script robotun tüm komutlarını ve kullanım örneklerini gösterir.
+"""
+
+echo "🤖 OTONOM BAHÇE ASISTANI (OBA) - YARDIM"
+echo "=================================="
+echo ""
+
+echo "📋 MEVCUT KOMUTLAR:"
+echo "  oba-help     Bu yardım menüsünü göster"
+echo "  oba-start    Robotu başlat (çeşitli modlarla)"
+echo "  oba-test     Test suite'lerini çalıştır"
+echo "  oba-status   Robot durumunu kontrol et"
+echo "  oba-logs     Log dosyalarını görüntüle"
+echo "  oba-clean    Geçici dosyaları temizle"
+echo ""
+
+echo "🚀 ROBOT BAŞLATMA ÖRNEKLERİ:"
+echo "  oba-start                    # Normal mod"
+echo "  oba-start sim                # Simülasyon modu"
+echo "  oba-start web                # Sadece web arayüzü"
+echo "  oba-start debug              # Debug modu"
+echo "  oba-start sim debug          # Simülasyon + Debug"
+echo ""
+
+echo "🧪 TEST ÖRNEKLERİ:"
+echo "  oba-test                     # Tüm testleri çalıştır"
+echo "  oba-test hardware            # Donanım testleri"
+echo "  oba-test navigation          # Navigation testleri"
+echo "  oba-test quick               # Hızlı testler"
+echo ""
+
+echo "📊 DURUM KONTROL ÖRNEKLERİ:"
+echo "  oba-status                   # Genel durum"
+echo "  oba-status battery           # Batarya durumu"
+echo "  oba-status gps               # GPS durumu"
+echo "  oba-status sensors           # Sensör durumu"
+echo ""
+
+echo "📝 LOG ÖRNEKLERİ:"
+echo "  oba-logs                     # Tüm logları göster"
+echo "  oba-logs error               # Sadece hataları göster"
+echo "  oba-logs today               # Bugünkü loglar"
+echo "  oba-logs follow              # Canlı log takibi"
+echo ""
+
+echo "🧹 TEMİZLİK ÖRNEKLERİ:"
+echo "  oba-clean                    # Geçici dosyaları temizle"
+echo "  oba-clean logs               # Eski logları temizle"
+echo "  oba-clean cache              # Cache dosyalarını temizle"
+echo "  oba-clean all                # Tam temizlik"
+echo ""
+
+echo "📁 DOSYA YOLLARı:"
+echo "  Proje kök dizini: $(pwd)"
+echo "  Konfigürasyon: config/robot_config.yaml"
+echo "  Log dosyaları: logs/"
+echo "  Test dosyaları: tests/"
+echo ""
+
+echo "🌐 WEB ARAYÜZÜ:"
+echo "  Web arayüzüne erişim: http://localhost:5000"
+echo "  Mobil arayüz: http://192.168.1.xxx:5000"
+echo ""
+
+echo "💡 İPUCU: Daha detaylı bilgi için dokümantasyona bakın:"
+echo "  📖 User Manual: docs/user_manual.md"
+echo "  🔧 Hardware: docs/hardware/wiring_diagram.md"
+echo "  🧪 Tests: tests/README.md"
+echo ""
+
+echo "🆘 SORUN GIDERME:"
+echo "  - Raspberry Pi'da çalışmıyorsa: sudo chmod +x /usr/local/bin/oba-*"
+echo "  - Import hatası alıyorsan: source venv/bin/activate"
+echo "  - GPIO izin hatası: sudo usermod -a -G gpio $USER"
+echo ""
+
+echo "👋 Kolay gelsin! 🤖"

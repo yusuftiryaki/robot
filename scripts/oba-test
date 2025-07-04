@@ -1,0 +1,276 @@
+#!/bin/bash
+# -*- codinecho "🌱 OBA TEST SÜİTİ"
+echo "==================" utf-8 -*-
+#
+# Otonom Bahçe Asistanı (OBA) - Test Suite Scripti
+# =================================================
+#
+# Bu script test süitlerini farklı modlarda çalıştırır.
+#
+
+# Proje ana dizinine git
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+cd "${SCRIPT_DIR}/.."
+
+# Renk kodları
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+PURPLE='\033[0;35m'
+CYAN='\033[0;36m'
+NC='\033[0m' # No Color
+
+# Banner
+echo -e "${CYAN}"
+echo "� OBA TEST SÜİTİ"
+echo "=================="
+echo -e "${NC}"
+
+# Parametreleri kontrol et
+TEST_MODULE=""
+VERBOSE=false
+QUICK=false
+COVERAGE=false
+
+for arg in "$@"; do
+    case $arg in
+        hardware|hw)
+            TEST_MODULE="hardware"
+            echo -e "${BLUE}🔧 Donanım testleri seçildi${NC}"
+            ;;
+        navigation|nav)
+            TEST_MODULE="navigation"
+            echo -e "${BLUE}🧭 Navigation testleri seçildi${NC}"
+            ;;
+        system|sys)
+            TEST_MODULE="system"
+            echo -e "${BLUE}⚙️ Sistem testleri seçildi${NC}"
+            ;;
+        integration|int)
+            TEST_MODULE="integration"
+            echo -e "${BLUE}🔗 Entegrasyon testleri seçildi${NC}"
+            ;;
+        quick|q)
+            QUICK=true
+            echo -e "${YELLOW}⚡ Hızlı test modu aktif${NC}"
+            ;;
+        verbose|v)
+            VERBOSE=true
+            echo -e "${CYAN}📝 Detaylı çıktı aktif${NC}"
+            ;;
+        coverage|cov)
+            COVERAGE=true
+            echo -e "${PURPLE}📊 Coverage raporu aktif${NC}"
+            ;;
+        help|-h|--help)
+            echo "Kullanım: oba-test [seçenekler]"
+            echo ""
+            echo "Test Modülleri:"
+            echo "  hardware, hw       Donanım testleri"
+            echo "  navigation, nav    Navigation testleri"
+            echo "  system, sys        Sistem testleri"
+            echo "  integration, int   Entegrasyon testleri"
+            echo ""
+            echo "Seçenekler:"
+            echo "  quick, q          Hızlı testler (sadece kritik)"
+            echo "  verbose, v        Detaylı çıktı"
+            echo "  coverage, cov     Coverage raporu"
+            echo "  help              Bu yardımı göster"
+            echo ""
+            echo "Örnekler:"
+            echo "  oba-test                  Tüm testleri çalıştır"
+            echo "  oba-test hardware         Donanım testleri"
+            echo "  oba-test quick            Hızlı testler"
+            echo "  oba-test nav verbose      Navigation + detaylı"
+            exit 0
+            ;;
+        *)
+            echo -e "${RED}❌ Bilinmeyen parametre: $arg${NC}"
+            echo "Yardım için: oba-test help"
+            exit 1
+            ;;
+    esac
+done
+
+# Sistem kontrolleri
+echo -e "${CYAN}🔍 Test ortamı kontrolleri...${NC}"
+
+# Python kontrolü
+if ! command -v python3 &> /dev/null; then
+    echo -e "${RED}❌ Python3 bulunamadı!${NC}"
+    exit 1
+fi
+
+# Test klasörü kontrolü
+echo "🔍 Mevcut dizin: $(pwd)"
+echo "📁 İçerik: $(ls -1 | head -5)"
+if [[ ! -d "tests" ]]; then
+    echo -e "${RED}❌ Test klasörü bulunamadı!${NC}"
+    exit 1
+fi
+
+# Log klasörünü oluştur
+if [[ ! -d "logs" ]]; then
+    mkdir -p logs
+    echo -e "${GREEN}✅ Log klasörü oluşturuldu${NC}"
+fi
+
+# Sanal ortam kontrolü (dev container'da atla)
+if [[ -f ".devcontainer/devcontainer.json" ]]; then
+    echo -e "${GREEN}🐳 Dev container ortamında çalışılıyor${NC}"
+elif [[ "$VIRTUAL_ENV" == "" ]]; then
+    echo -e "${YELLOW}⚠️ Sanal ortam aktif değil${NC}"
+    if [[ -f "venv/bin/activate" ]]; then
+        source venv/bin/activate
+        echo -e "${GREEN}✅ Sanal ortam aktifleştirildi${NC}"
+    fi
+fi
+
+# Test komutunu oluştur
+if $COVERAGE; then
+    # Coverage için pytest kullan
+    if command -v pytest &> /dev/null; then
+        TEST_CMD="pytest tests/ --cov=src --cov-report=html --cov-report=term"
+    else
+        echo -e "${YELLOW}⚠️ pytest bulunamadı, normal test runner kullanılıyor${NC}"
+        TEST_CMD="python3 tests/test_runner.py"
+    fi
+else
+    TEST_CMD="python3 tests/test_runner.py"
+fi
+
+# Modül parametresi ekle
+if [[ -n "$TEST_MODULE" ]]; then
+    TEST_CMD="$TEST_CMD --module $TEST_MODULE"
+fi
+
+# Verbose parametresi ekle
+if $VERBOSE; then
+    TEST_CMD="$TEST_CMD --verbose"
+fi
+
+# Hızlı test modu
+if $QUICK; then
+    echo -e "${YELLOW}⚡ Hızlı test modu - sadece kritik testler çalışacak${NC}"
+    # Hızlı testler için environment variable set et
+    export QUICK_TESTS=true
+fi
+
+# Test başlangıç bilgileri
+echo -e "${CYAN}ℹ️ Test bilgileri:${NC}"
+echo "  🐍 Python: $(python3 --version)"
+echo "  📁 Test dizini: tests/"
+echo "  🔧 Komut: $TEST_CMD"
+
+if [[ -n "$TEST_MODULE" ]]; then
+    echo "  📦 Modül: $TEST_MODULE"
+else
+    echo "  📦 Modül: Tümü"
+fi
+
+if $QUICK; then
+    echo "  ⚡ Mod: Hızlı testler"
+else
+    echo "  🧪 Mod: Tam test suite"
+fi
+
+if $COVERAGE; then
+    echo "  📊 Coverage: Aktif"
+fi
+
+echo ""
+
+# Test öncesi sistem durumu
+echo -e "${CYAN}📊 Sistem durumu:${NC}"
+
+# Bellek kullanımı
+if command -v free &> /dev/null; then
+    MEMORY_INFO=$(free -h | grep '^Mem:' | awk '{print $3 "/" $2}')
+    echo "  💾 Bellek: $MEMORY_INFO"
+fi
+
+# Disk alanı
+DISK_INFO=$(df -h . | tail -1 | awk '{print $4 " kullanılabilir"}')
+echo "  💿 Disk: $DISK_INFO"
+
+# CPU bilgisi
+if command -v nproc &> /dev/null; then
+    CPU_COUNT=$(nproc)
+    echo "  🔥 CPU: $CPU_COUNT çekirdek"
+fi
+
+echo ""
+
+# Özel durumlar için uyarılar
+if [[ "$TEST_MODULE" == "hardware" ]] || [[ -z "$TEST_MODULE" ]]; then
+    echo -e "${YELLOW}⚠️ DİKKAT: Donanım testleri çalışacak!${NC}"
+    echo "   • Raspberry Pi dışında çalışıyorsanız simülasyon modu kullanılacak"
+    echo "   • GPIO testleri root izni gerektirebilir"
+    echo ""
+fi
+
+# Test çalıştırma
+echo -e "${GREEN}🧪 Testler başlatılıyor...${NC}"
+echo "   Durdurmak için: Ctrl+C"
+echo ""
+
+# Başlangıç zamanını kaydet
+START_TIME=$(date +%s)
+
+# Test komutunu çalıştır
+if $VERBOSE; then
+    echo -e "${BLUE}🔧 Çalıştırılan komut: $TEST_CMD${NC}"
+    echo ""
+fi
+
+# Testleri çalıştır ve çıkış kodunu yakala
+set +e  # Hata durumunda script'i durdurmaya
+eval $TEST_CMD
+TEST_EXIT_CODE=$?
+set -e
+
+# Bitiş zamanını hesapla
+END_TIME=$(date +%s)
+DURATION=$((END_TIME - START_TIME))
+
+echo ""
+echo -e "${CYAN}📊 Test özeti:${NC}"
+echo "  ⏱️ Süre: ${DURATION} saniye"
+
+# Çıkış koduna göre sonuç
+if [[ $TEST_EXIT_CODE -eq 0 ]]; then
+    echo -e "${GREEN}✅ Tüm testler başarılı!${NC}"
+
+    # Coverage raporu varsa
+    if $COVERAGE && [[ -d "htmlcov" ]]; then
+        echo -e "${PURPLE}📊 Coverage raporu: file://$(pwd)/htmlcov/index.html${NC}"
+    fi
+
+    # Log dosyası varsa
+    if [[ -f "logs/genel_test_raporu.txt" ]]; then
+        echo -e "${BLUE}📝 Detaylı rapor: logs/genel_test_raporu.txt${NC}"
+    fi
+
+else
+    echo -e "${RED}❌ Bazı testler başarısız! (Çıkış kodu: $TEST_EXIT_CODE)${NC}"
+
+    # Hata logları varsa
+    if [[ -f "logs/test_errors.log" ]]; then
+        echo -e "${RED}🚨 Hata detayları: logs/test_errors.log${NC}"
+    fi
+
+    echo ""
+    echo -e "${YELLOW}💡 Sorun giderme önerileri:${NC}"
+    echo "   • Detaylı çıktı için: oba-test verbose"
+    echo "   • Sadece bir modül test et: oba-test hardware"
+    echo "   • Log dosyalarını kontrol et: oba-logs error"
+fi
+
+echo ""
+echo -e "${CYAN}🎯 Yararlı komutlar:${NC}"
+echo "  oba-logs                Test loglarını görüntüle"
+echo "  oba-test quick          Hızlı testler"
+echo "  oba-test help           Test yardımı"
+
+exit $TEST_EXIT_CODE

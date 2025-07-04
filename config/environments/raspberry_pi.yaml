@@ -1,0 +1,205 @@
+# OBA Robot - Raspberry Pi Hardware Configuration
+# Gerçek Donanım Ortamı Ayarları
+
+robot:
+  name: "OBA Hardware"
+  version: "1.0.0"
+
+# =====================================
+# ⚙️ HARDWARE SETTINGS
+# =====================================
+simulation:
+  enabled: false
+
+# =====================================
+# 🚗 MOTOR CONTROL
+# =====================================
+motors:
+  type: "hardware"
+  driver: "l298n"
+  pins:
+    # Sol motor
+    left_pwm: 18
+    left_dir1: 19
+    left_dir2: 20
+    left_enable: 21
+    # Sağ motor
+    right_pwm: 12
+    right_dir1: 16
+    right_dir2: 17
+    right_enable: 25
+  specs:
+    max_speed: 0.8 # 0-1 arası
+    acceleration: 0.3
+    deceleration: 0.5
+    wheel_radius: 0.032 # meters
+    wheel_distance: 0.16 # meters
+    encoder_ppr: 20 # pulse per revolution
+
+# =====================================
+# 📡 SENSORS
+# =====================================
+sensors:
+  mock_enabled: false
+
+  # Ultrasonik sensörler
+  ultrasonic:
+    - name: "front"
+      trigger_pin: 24
+      echo_pin: 25
+      max_distance: 400 # cm
+    - name: "left"
+      trigger_pin: 22
+      echo_pin: 23
+      max_distance: 400
+    - name: "right"
+      trigger_pin: 26
+      echo_pin: 27
+      max_distance: 400
+
+  # I2C sensörleri
+  i2c:
+    bus: 1
+    devices:
+      - type: "mpu6050" # IMU
+        address: 0x68
+        name: "main_imu"
+      - type: "ina219" # Güç monitörü
+        address: 0x40
+        name: "power_monitor"
+
+  # GPIO sensörleri
+  gpio:
+    - type: "button"
+      pin: 2
+      name: "emergency_stop"
+      pull_up: true
+    - type: "led"
+      pin: 4
+      name: "status_led"
+
+# =====================================
+# 📷 CAMERA SETTINGS
+# =====================================
+camera:
+  enabled: true
+  type: "hardware"
+  device: "/dev/video0"
+  resolution:
+    width: 640
+    height: 480
+  fps: 30
+  auto_exposure: true
+  auto_white_balance: true
+  brightness: 50
+  contrast: 50
+  saturation: 50
+
+# =====================================
+# 🌐 WEB INTERFACE
+# =====================================
+web_interface:
+  enabled: true
+  host: "0.0.0.0"
+  port: 8080
+  debug: false
+  ssl_enabled: false
+  cors_enabled: true
+
+# =====================================
+# 📊 LOGGING
+# =====================================
+logging:
+  level: "INFO"
+  console:
+    enabled: true
+    colored: false # Terminal renkleri Pi'de sorun çıkarabilir
+    format: "%(asctime)s | %(levelname)s | %(message)s"
+  file:
+    enabled: true
+    path: "/home/pi/oba/logs"
+    filename: "robot.log"
+    max_size: "50MB"
+    backup_count: 3
+    rotation: "size"
+
+  # Syslog için
+  syslog:
+    enabled: true
+    facility: "daemon"
+
+# =====================================
+# 🤖 AI/ML SETTINGS
+# =====================================
+ai:
+  enabled: true
+  debug_mode: false
+  model_path: "/home/pi/oba/models"
+  use_cpu: true # Pi'de GPU yok
+  confidence_threshold: 0.7
+  max_inference_time: 1.0 # seconds
+
+# =====================================
+# 📁 DATA PATHS
+# =====================================
+paths:
+  data: "/home/pi/oba/data"
+  logs: "/home/pi/oba/logs"
+  models: "/home/pi/oba/models"
+  config: "/home/pi/oba/config"
+  temp: "/tmp/oba"
+
+# =====================================
+# ⚡ PERFORMANCE OPTIMIZATION
+# =====================================
+performance:
+  cpu_limit: 80 # %
+  memory_limit: 512 # MB
+  loop_frequency: 20 # Hz
+  sensor_update_rate: 10 # Hz
+  camera_buffer_size: 1
+
+# =====================================
+# 🔄 SYSTEM SETTINGS
+# =====================================
+system:
+  auto_start: true
+  watchdog_enabled: true
+  recovery_mode: true
+  gpio_cleanup: true
+
+  # Güç yönetimi
+  power_management:
+    low_battery_threshold: 20 # %
+    critical_battery_threshold: 10 # %
+    shutdown_on_critical: true
+    sleep_on_idle: true
+    idle_timeout: 300 # seconds
+
+# =====================================
+# 🛡️ SAFETY SETTINGS
+# =====================================
+safety:
+  emergency_stop_enabled: true
+  obstacle_avoidance: true
+  max_speed_limit: 0.5 # m/s
+  collision_threshold: 10 # cm
+  failsafe_mode: "stop" # stop, return_home, shutdown
+
+# =====================================
+# 📡 COMMUNICATION
+# =====================================
+communication:
+  wifi:
+    ap_mode: false
+    ssid: "OBA_Robot"
+    password: "oba12345"
+
+  mqtt:
+    enabled: true
+    broker: "localhost"
+    port: 1883
+    topics:
+      status: "oba/status"
+      commands: "oba/commands"
+      telemetry: "oba/telemetry"

@@ -1,0 +1,110 @@
+# OBA Konfigürasyon Dosyası
+robot:
+  name: "OBA_Bahce_Asistani"
+  version: "1.0.0"
+  debug_mode: true
+
+# Hardware Pin Konfigürasyonları
+hardware:
+  motors:
+    left_wheel:
+      pin_a: 18
+      pin_b: 19
+      encoder_pin: 20
+      max_speed: 255
+    right_wheel:
+      pin_a: 21
+      pin_b: 22
+      encoder_pin: 23
+      max_speed: 255
+    main_brush:
+      pin_a: 24
+      pin_b: 25
+      max_speed: 200
+    side_brush_left:
+      pin_a: 26
+      pin_b: 27
+      max_speed: 150
+    side_brush_right:
+      pin_a: 5
+      pin_b: 6
+      max_speed: 150
+    fan:
+      pin_a: 12
+      pin_b: 13
+      max_speed: 180
+
+  sensors:
+    mpu6050:
+      i2c_address: 0x68
+      sda_pin: 2
+      scl_pin: 3
+      sample_rate: 50 # Hz
+
+    gps:
+      uart_tx: 14
+      uart_rx: 15
+      baud_rate: 9600
+
+    camera:
+      port: 0
+      resolution: [640, 480]
+      framerate: 30
+
+    front_bumper:
+      pin: 16
+      pull_up: true
+
+    ina219:
+      i2c_address: 0x40
+      sda_pin: 2
+      scl_pin: 3
+
+# Navigasyon Ayarları
+navigation:
+  wheel_diameter: 0.065 # metre
+  wheel_base: 0.235 # metre (tekerlekler arası mesafe)
+  max_speed: 0.5 # m/s
+  max_angular_speed: 1.0 # rad/s
+
+  # Kalman Filter parametreleri
+  kalman:
+    process_noise: 0.1
+    measurement_noise: 0.5
+
+  # Path planning
+  path_planning:
+    grid_resolution: 0.1 # metre
+    obstacle_padding: 0.2 # metre
+
+# Görev Yönetimi
+missions:
+  mowing:
+    pattern: "boustrophedon" # biçerdöver metodu
+    overlap: 0.1 # metre
+    speed: 0.3 # m/s
+
+  charging:
+    battery_low_threshold: 20 # %
+    battery_full_threshold: 95 # %
+    dock_approach_speed: 0.1 # m/s
+
+# Web Arayüzü
+web:
+  host: "0.0.0.0"
+  port: 5000
+  secret_key: "haci_abi_secret_2024"
+
+# Güvenlik
+safety:
+  emergency_stop_pin: 17
+  max_tilt_angle: 30 # derece
+  obstacle_distance: 0.3 # metre
+  watchdog_timeout: 5 # saniye
+
+# Logging
+logging:
+  level: "INFO"
+  file: "logs/robot.log"
+  max_size: "10MB"
+  backup_count: 5

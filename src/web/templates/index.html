@@ -1,0 +1,789 @@
+<!DOCTYPE html>
+<html lang="tr">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🌱 Otonom Bahçe Asistanı (OBA)</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.js"></script>
+    <style>
+        :root {
+            --primary-color: #2E8B57;
+            --secondary-color: #228B22;
+            --danger-color: #DC143C;
+            --warning-color: #FF8C00;
+            --dark-color: #2F4F4F;
+            --light-color: #F5F5F5;
+            --border-radius: 12px;
+            --shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #e8f5e8 0%, #f0f8f0 100%);
+            color: var(--dark-color);
+            line-height: 1.6;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+            background: white;
+            padding: 20px;
+            border-radius: var(--border-radius);
+            box-shadow: var(--shadow);
+        }
+
+        .header h1 {
+            color: var(--primary-color);
+            font-size: 2rem;
+            margin-bottom: 10px;
+        }
+
+        .status-indicator {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 8px;
+            animation: pulse 2s infinite;
+        }
+
+        .status-connected {
+            background-color: var(--secondary-color);
+        }
+
+        .status-disconnected {
+            background-color: var(--danger-color);
+        }
+
+        @keyframes pulse {
+            0% {
+                opacity: 1;
+            }
+
+            50% {
+                opacity: 0.5;
+            }
+
+            100% {
+                opacity: 1;
+            }
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+
+        .card {
+            background: white;
+            border-radius: var(--border-radius);
+            box-shadow: var(--shadow);
+            padding: 20px;
+            transition: transform 0.2s ease;
+        }
+
+        .card:hover {
+            transform: translateY(-2px);
+        }
+
+        .card-header {
+            font-size: 1.2rem;
+            font-weight: bold;
+            color: var(--primary-color);
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .video-container {
+            position: relative;
+            width: 100%;
+            aspect-ratio: 4/3;
+            background: #000;
+            border-radius: var(--border-radius);
+            overflow: hidden;
+            margin-bottom: 20px;
+        }
+
+        .video-stream {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .video-overlay {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 5px 10px;
+            border-radius: 5px;
+            font-size: 0.8rem;
+        }
+
+        .control-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 10px;
+            margin: 20px 0;
+        }
+
+        .control-button {
+            padding: 15px;
+            border: none;
+            border-radius: var(--border-radius);
+            font-size: 1rem;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            color: white;
+        }
+
+        .control-button:active {
+            transform: scale(0.95);
+        }
+
+        .btn-primary {
+            background: var(--primary-color);
+        }
+
+        .btn-primary:hover {
+            background: var(--secondary-color);
+        }
+
+        .btn-danger {
+            background: var(--danger-color);
+        }
+
+        .btn-danger:hover {
+            background: #B22222;
+        }
+
+        .btn-warning {
+            background: var(--warning-color);
+        }
+
+        .btn-warning:hover {
+            background: #FF7F00;
+        }
+
+        .joystick-container {
+            display: flex;
+            justify-content: center;
+            margin: 20px 0;
+        }
+
+        .joystick {
+            width: 150px;
+            height: 150px;
+            border: 3px solid var(--primary-color);
+            border-radius: 50%;
+            position: relative;
+            background: linear-gradient(45deg, #f0f8f0, #e8f5e8);
+            cursor: pointer;
+        }
+
+        .joystick-knob {
+            width: 40px;
+            height: 40px;
+            background: var(--primary-color);
+            border-radius: 50%;
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+            transition: all 0.1s ease;
+        }
+
+        .status-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+            gap: 15px;
+        }
+
+        .status-item {
+            text-align: center;
+            padding: 15px;
+            background: var(--light-color);
+            border-radius: var(--border-radius);
+        }
+
+        .status-value {
+            font-size: 1.5rem;
+            font-weight: bold;
+            color: var(--primary-color);
+        }
+
+        .status-label {
+            font-size: 0.9rem;
+            color: var(--dark-color);
+            margin-top: 5px;
+        }
+
+        .log-container {
+            background: #1e1e1e;
+            color: #00ff00;
+            font-family: 'Courier New', monospace;
+            padding: 15px;
+            border-radius: var(--border-radius);
+            height: 200px;
+            overflow-y: auto;
+            font-size: 0.8rem;
+            line-height: 1.4;
+        }
+
+        .log-line {
+            margin-bottom: 5px;
+        }
+
+        .emergency-popup {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(220, 20, 60, 0.9);
+            color: white;
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+            text-align: center;
+        }
+
+        .emergency-content {
+            font-size: 2rem;
+            font-weight: bold;
+        }
+
+        .toggle-switch {
+            position: relative;
+            display: inline-block;
+            width: 60px;
+            height: 34px;
+        }
+
+        .toggle-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #ccc;
+            transition: .4s;
+            border-radius: 34px;
+        }
+
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 26px;
+            width: 26px;
+            left: 4px;
+            bottom: 4px;
+            background-color: white;
+            transition: .4s;
+            border-radius: 50%;
+        }
+
+        input:checked+.slider {
+            background-color: var(--primary-color);
+        }
+
+        input:checked+.slider:before {
+            transform: translateX(26px);
+        }
+
+        @media (max-width: 768px) {
+            .container {
+                padding: 10px;
+            }
+
+            .grid {
+                grid-template-columns: 1fr;
+            }
+
+            .header h1 {
+                font-size: 1.5rem;
+            }
+
+            .control-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <!-- Header -->
+        <div class="header">
+            <h1>🌱 Otonom Bahçe Asistanı (OBA)</h1>
+            <p>
+                <span id="connection-status" class="status-indicator status-disconnected"></span>
+                <span id="connection-text">Bağlanıyor...</span>
+            </p>
+        </div>
+
+        <!-- Ana Grid -->
+        <div class="grid">
+            <!-- Video Feed -->
+            <div class="card">
+                <div class="card-header">
+                    📷 Canlı Kamera Görüntüsü
+                </div>
+                <div class="video-container">
+                    <img id="video-stream" class="video-stream" src="/video_feed" alt="OBA Kamerası">
+                    <div class="video-overlay" id="video-status">Canlı</div>
+                </div>
+            </div>
+
+            <!-- OBA Durumu -->
+            <div class="card">
+                <div class="card-header">
+                    🌱 OBA Durumu
+                </div>
+                <div class="status-grid">
+                    <div class="status-item">
+                        <div class="status-value" id="robot-state">--</div>
+                        <div class="status-label">Durum</div>
+                    </div>
+                    <div class="status-item">
+                        <div class="status-value" id="battery-level">--%</div>
+                        <div class="status-label">Batarya</div>
+                    </div>
+                    <div class="status-item">
+                        <div class="status-value" id="gps-satellites">--</div>
+                        <div class="status-label">GPS Uydu</div>
+                    </div>
+                    <div class="status-item">
+                        <div class="status-value" id="mission-progress">--%</div>
+                        <div class="status-label">İlerleme</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="grid">
+            <!-- Manuel Kontrol -->
+            <div class="card">
+                <div class="card-header">
+                    🎮 Manuel Kontrol
+                </div>
+
+                <!-- Joystick -->
+                <div class="joystick-container">
+                    <div class="joystick" id="joystick">
+                        <div class="joystick-knob" id="joystick-knob"></div>
+                    </div>
+                </div>
+
+                <!-- Kontrol Butonları -->
+                <div class="control-grid">
+                    <button class="control-button btn-primary" onclick="moveForward()">⬆️ İleri</button>
+                    <button class="control-button btn-primary" onclick="turnLeft()">⬅️ Sol</button>
+                    <button class="control-button btn-primary" onclick="turnRight()">➡️ Sağ</button>
+                    <button class="control-button btn-primary" onclick="moveBackward()">⬇️ Geri</button>
+                    <button class="control-button btn-warning" onclick="stopRobot()">⏹️ Dur</button>
+                    <button class="control-button btn-danger" onclick="emergencyStop()">🚨 ACİL</button>
+                </div>
+
+                <!-- Aksesuar Kontrolleri -->
+                <div style="margin-top: 20px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin: 10px 0;">
+                        <label>🌪️ Fırçalar</label>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="brushes-toggle" onchange="toggleBrushes()">
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin: 10px 0;">
+                        <label>🌬️ Fan</label>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="fan-toggle" onchange="toggleFan()">
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Görev Kontrolleri -->
+            <div class="card">
+                <div class="card-header">
+                    🎯 Görev Yönetimi
+                </div>
+
+                <div class="control-grid">
+                    <button class="control-button btn-primary" onclick="startMission('mowing')">🌱 Biçme Başlat</button>
+                    <button class="control-button btn-warning" onclick="stopMission()">⏸️ Görevi Durdur</button>
+                    <button class="control-button btn-primary" onclick="returnToDock()">🔌 Şarja Dön</button>
+                </div>
+
+                <div style="margin-top: 20px;">
+                    <h4>Görev İstatistikleri</h4>
+                    <div class="status-grid">
+                        <div class="status-item">
+                            <div class="status-value" id="total-distance">-- m</div>
+                            <div class="status-label">Toplam Mesafe</div>
+                        </div>
+                        <div class="status-item">
+                            <div class="status-value" id="working-time">-- dk</div>
+                            <div class="status-label">Çalışma Süresi</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Sensör Verileri -->
+        <div class="card">
+            <div class="card-header">
+                📡 Sensör Verileri
+            </div>
+            <div class="status-grid">
+                <div class="status-item">
+                    <div class="status-value" id="gps-lat">--°</div>
+                    <div class="status-label">Enlem</div>
+                </div>
+                <div class="status-item">
+                    <div class="status-value" id="gps-lon">--°</div>
+                    <div class="status-label">Boylam</div>
+                </div>
+                <div class="status-item">
+                    <div class="status-value" id="imu-roll">--°</div>
+                    <div class="status-label">Roll</div>
+                </div>
+                <div class="status-item">
+                    <div class="status-value" id="imu-pitch">--°</div>
+                    <div class="status-label">Pitch</div>
+                </div>
+                <div class="status-item">
+                    <div class="status-value" id="battery-voltage">-- V</div>
+                    <div class="status-label">Voltaj</div>
+                </div>
+                <div class="status-item">
+                    <div class="status-value" id="battery-current">-- A</div>
+                    <div class="status-label">Akım</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Loglar -->
+        <div class="card">
+            <div class="card-header">
+                📋 Sistem Logları
+            </div>
+            <div class="log-container" id="log-container">
+                <div class="log-line">🤖 Hacı Abi'nin Bahçe Robotu başlatılıyor...</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Acil Durum Popup -->
+    <div class="emergency-popup" id="emergency-popup">
+        <div class="emergency-content">
+            🚨 ACİL DURUM AKTİF! 🚨<br>
+            <button class="control-button btn-primary" onclick="clearEmergency()"
+                style="margin-top: 20px;">Temizle</button>
+        </div>
+    </div>
+
+    <script>
+        // Socket.IO bağlantısı
+        const socket = io();
+
+        // Global değişkenler
+        let isConnected = false;
+        let joystickActive = false;
+        let joystickCenter = { x: 0, y: 0 };
+
+        // Bağlantı olayları
+        socket.on('connect', function () {
+            isConnected = true;
+            updateConnectionStatus(true);
+            addLog('✅ Robot kontrolüne bağlandı');
+        });
+
+        socket.on('disconnect', function () {
+            isConnected = false;
+            updateConnectionStatus(false);
+            addLog('❌ Robot bağlantısı kesildi');
+        });
+
+        // Robot veri güncellemeleri
+        socket.on('robot_data_update', function (data) {
+            updateRobotStatus(data);
+        });
+
+        // Acil durum uyarısı
+        socket.on('emergency_alert', function (data) {
+            showEmergencyPopup(data.message);
+        });
+
+        // Bağlantı durumunu güncelle
+        function updateConnectionStatus(connected) {
+            const indicator = document.getElementById('connection-status');
+            const text = document.getElementById('connection-text');
+
+            if (connected) {
+                indicator.className = 'status-indicator status-connected';
+                text.textContent = 'Bağlı';
+            } else {
+                indicator.className = 'status-indicator status-disconnected';
+                text.textContent = 'Bağlantı Yok';
+            }
+        }
+
+        // Robot durumunu güncelle
+        function updateRobotStatus(data) {
+            try {
+                // Robot durumu
+                if (data.robot_status) {
+                    document.getElementById('robot-state').textContent = data.robot_status.state || '--';
+                    document.getElementById('battery-level').textContent = `${data.robot_status.battery_level || 0}%`;
+                    document.getElementById('mission-progress').textContent = `${data.robot_status.mission_progress || 0}%`;
+                }
+
+                // GPS verileri
+                if (data.sensors && data.sensors.gps) {
+                    document.getElementById('gps-satellites').textContent = data.sensors.gps.satellites || '--';
+                    document.getElementById('gps-lat').textContent = `${data.sensors.gps.latitude?.toFixed(6) || '--'}°`;
+                    document.getElementById('gps-lon').textContent = `${data.sensors.gps.longitude?.toFixed(6) || '--'}°`;
+                }
+
+                // IMU verileri
+                if (data.sensors && data.sensors.imu) {
+                    document.getElementById('imu-roll').textContent = `${data.sensors.imu.roll?.toFixed(1) || '--'}°`;
+                    document.getElementById('imu-pitch').textContent = `${data.sensors.imu.pitch?.toFixed(1) || '--'}°`;
+                }
+
+                // Batarya verileri
+                if (data.sensors && data.sensors.battery) {
+                    document.getElementById('battery-voltage').textContent = `${data.sensors.battery.voltage?.toFixed(1) || '--'} V`;
+                    document.getElementById('battery-current').textContent = `${data.sensors.battery.current?.toFixed(1) || '--'} A`;
+                }
+
+            } catch (error) {
+                console.error('Robot status güncelleme hatası:', error);
+            }
+        }
+
+        // Log ekleme
+        function addLog(message) {
+            const logContainer = document.getElementById('log-container');
+            const logLine = document.createElement('div');
+            logLine.className = 'log-line';
+            logLine.textContent = `${new Date().toLocaleTimeString()} - ${message}`;
+            logContainer.appendChild(logLine);
+            logContainer.scrollTop = logContainer.scrollHeight;
+
+            // Maksimum 100 log sat��rı tut
+            while (logContainer.children.length > 100) {
+                logContainer.removeChild(logContainer.firstChild);
+            }
+        }
+
+        // Manuel kontrol fonksiyonları
+        function moveForward() {
+            sendManualControl(0.3, 0);
+            addLog('➡️ İleri hareket');
+        }
+
+        function moveBackward() {
+            sendManualControl(-0.3, 0);
+            addLog('⬅️ Geri hareket');
+        }
+
+        function turnLeft() {
+            sendManualControl(0, 0.5);
+            addLog('🔄 Sola dönme');
+        }
+
+        function turnRight() {
+            sendManualControl(0, -0.5);
+            addLog('🔄 Sağa dönme');
+        }
+
+        function stopRobot() {
+            sendManualControl(0, 0);
+            addLog('⏹️ Robot durduruldu');
+        }
+
+        function emergencyStop() {
+            socket.emit('emergency_stop');
+            addLog('🚨 ACİL DURDURMA!');
+        }
+
+        function sendManualControl(linear, angular) {
+            if (isConnected) {
+                socket.emit('manual_control', {
+                    linear: linear,
+                    angular: angular
+                });
+            }
+        }
+
+        // Aksesuar kontrolleri
+        function toggleBrushes() {
+            const active = document.getElementById('brushes-toggle').checked;
+            // Robot'a fırça komutunu gönder
+            addLog(`🌪️ Fırçalar ${active ? 'açıldı' : 'kapatıldı'}`);
+        }
+
+        function toggleFan() {
+            const active = document.getElementById('fan-toggle').checked;
+            // Robot'a fan komutunu gönder
+            addLog(`🌬️ Fan ${active ? 'açıldı' : 'kapatıldı'}`);
+        }
+
+        // Görev kontrolleri
+        function startMission(type) {
+            socket.emit('start_mission', { type: type });
+            addLog(`🎯 ${type} görevi başlatıldı`);
+        }
+
+        function stopMission() {
+            socket.emit('stop_mission');
+            addLog('⏸️ Görev durduruldu');
+        }
+
+        function returnToDock() {
+            // Şarj istasyonuna dönme komutunu gönder
+            addLog('🔌 Şarj istasyonuna dönülüyor');
+        }
+
+        // Joystick kontrolü
+        function initJoystick() {
+            const joystick = document.getElementById('joystick');
+            const knob = document.getElementById('joystick-knob');
+            const rect = joystick.getBoundingClientRect();
+
+            joystickCenter.x = rect.width / 2;
+            joystickCenter.y = rect.height / 2;
+
+            joystick.addEventListener('mousedown', startJoystick);
+            joystick.addEventListener('touchstart', startJoystick);
+
+            document.addEventListener('mouseup', stopJoystick);
+            document.addEventListener('touchend', stopJoystick);
+
+            document.addEventListener('mousemove', moveJoystick);
+            document.addEventListener('touchmove', moveJoystick);
+        }
+
+        function startJoystick(e) {
+            joystickActive = true;
+            e.preventDefault();
+        }
+
+        function stopJoystick() {
+            if (joystickActive) {
+                joystickActive = false;
+                const knob = document.getElementById('joystick-knob');
+                knob.style.left = '50%';
+                knob.style.top = '50%';
+                sendManualControl(0, 0);
+            }
+        }
+
+        function moveJoystick(e) {
+            if (!joystickActive) return;
+
+            e.preventDefault();
+
+            const joystick = document.getElementById('joystick');
+            const knob = document.getElementById('joystick-knob');
+            const rect = joystick.getBoundingClientRect();
+
+            let clientX, clientY;
+            if (e.type.includes('touch')) {
+                clientX = e.touches[0].clientX;
+                clientY = e.touches[0].clientY;
+            } else {
+                clientX = e.clientX;
+                clientY = e.clientY;
+            }
+
+            let x = clientX - rect.left - joystickCenter.x;
+            let y = clientY - rect.top - joystickCenter.y;
+
+            const maxDistance = joystickCenter.x - 20;
+            const distance = Math.sqrt(x * x + y * y);
+
+            if (distance > maxDistance) {
+                x = (x / distance) * maxDistance;
+                y = (y / distance) * maxDistance;
+            }
+
+            knob.style.left = `${50 + (x / maxDistance) * 35}%`;
+            knob.style.top = `${50 + (y / maxDistance) * 35}%`;
+
+            // Joystick değerlerini robot komutlarına çevir
+            const linear = -y / maxDistance * 0.3;  // Y ekseni ters
+            const angular = -x / maxDistance * 0.5; // X ekseni
+
+            sendManualControl(linear, angular);
+        }
+
+        // Acil durum popup
+        function showEmergencyPopup(message) {
+            const popup = document.getElementById('emergency-popup');
+            popup.style.display = 'flex';
+            addLog(`🚨 ${message}`);
+        }
+
+        function clearEmergency() {
+            const popup = document.getElementById('emergency-popup');
+            popup.style.display = 'none';
+            addLog('✅ Acil durum temizlendi');
+        }
+
+        // Sayfa yüklendiğinde
+        document.addEventListener('DOMContentLoaded', function () {
+            initJoystick();
+            addLog('🚀 Web arayüzü başlatıldı');
+
+            // Periyodik status güncellemesi
+            setInterval(function () {
+                if (isConnected) {
+                    fetch('/api/robot/status')
+                        .then(response => response.json())
+                        .then(data => {
+                            if (data.success) {
+                                updateRobotStatus(data.data);
+                            }
+                        })
+                        .catch(error => console.error('Status güncelleme hatası:', error));
+                }
+            }, 2000); // 2 saniyede bir güncelle
+        });
+    </script>
+</body>
+
+</html>

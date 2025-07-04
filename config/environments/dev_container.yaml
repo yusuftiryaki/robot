@@ -1,0 +1,135 @@
+# OBA Robot - Development Environment Configuration
+# Dev Container / Geliştirme Ortamı Ayarları
+
+robot:
+  name: "OBA Development"
+  version: "1.0.0-dev"
+
+# =====================================
+# 🎮 SIMULATION SETTINGS
+# =====================================
+simulation:
+  enabled: true
+  visualization: true
+  mock_sensors: true
+  real_time_factor: 1.0
+
+# =====================================
+# 🔧 HARDWARE EMULATION
+# =====================================
+motors:
+  type: "simulation"
+  mock_motors: true
+  simulation_params:
+    max_speed: 1.0
+    acceleration: 0.5
+    wheel_radius: 0.032 # meters
+    wheel_distance: 0.16 # meters
+
+sensors:
+  mock_enabled: true
+  simulation_sensors:
+    - type: "ultrasonic"
+      name: "front"
+      min_range: 0.02 # 2cm
+      max_range: 4.0 # 4m
+      field_of_view: 15 # degrees
+    - type: "ultrasonic"
+      name: "left"
+      min_range: 0.02
+      max_range: 4.0
+      field_of_view: 15
+    - type: "ultrasonic"
+      name: "right"
+      min_range: 0.02
+      max_range: 4.0
+      field_of_view: 15
+    - type: "imu"
+      name: "main_imu"
+      update_rate: 100 # Hz
+    - type: "battery"
+      name: "main_battery"
+      initial_level: 85 # %
+      drain_rate: 0.1 # %/hour
+
+# =====================================
+# 📷 CAMERA SETTINGS
+# =====================================
+camera:
+  enabled: true
+  type: "simulation"
+  device_id: 0
+  resolution:
+    width: 640
+    height: 480
+  fps: 30
+  auto_exposure: true
+  simulation_params:
+    test_pattern: true
+    noise_level: 0.05
+
+# =====================================
+# 🌐 WEB INTERFACE
+# =====================================
+web_interface:
+  enabled: true
+  host: "0.0.0.0" # Dev container'da dışarıdan erişim
+  port: 5000
+  debug: true
+  auto_reload: true
+  cors_enabled: true
+
+# =====================================
+# 📊 LOGGING
+# =====================================
+logging:
+  level: "DEBUG"
+  console:
+    enabled: true
+    colored: true
+    format: "%(asctime)s | %(name)s | %(levelname)s | %(message)s"
+  file:
+    enabled: true
+    path: "/workspaces/oba/logs"
+    filename: "robot_dev.log"
+    max_size: "10MB"
+    backup_count: 5
+    rotation: "time"
+
+# =====================================
+# 🤖 AI/ML SETTINGS
+# =====================================
+ai:
+  enabled: true
+  debug_mode: true
+  model_path: "/workspaces/oba/models"
+  use_cpu: true # Dev ortamında CPU kullan
+  confidence_threshold: 0.5
+
+# =====================================
+# 📁 DATA PATHS
+# =====================================
+paths:
+  data: "/workspaces/oba/data"
+  logs: "/workspaces/oba/logs"
+  models: "/workspaces/oba/models"
+  config: "/workspaces/oba/config"
+  temp: "/workspaces/oba/temp"
+
+# =====================================
+# 🔄 UPDATE SETTINGS
+# =====================================
+updates:
+  check_interval: 300 # seconds
+  auto_restart: false
+  backup_config: true
+
+# =====================================
+# 🎯 DEVELOPMENT FEATURES
+# =====================================
+development:
+  hot_reload: true
+  profiling: true
+  memory_monitoring: true
+  performance_logging: true
+  test_mode: true

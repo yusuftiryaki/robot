@@ -1,0 +1,443 @@
+#!/bin/bash
+# -*- coding: utf-8 -*-
+"""
+Otonom Bahçe Asistanı (OBA) - Temizlik Scripti
+====================================
+
+Bu script geçici dosyaları ve eski logları temizler.
+"""
+
+# Proje ana dizinine git
+cd "$(dirname "$0")/.."
+
+# Renk kodları
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+PURPLE='\033[0;35m'
+CYAN='\033[0;36m'
+NC='\033[0m' # No Color
+
+# Banner
+echo -e "${CYAN}"
+echo "🧹 ROBOT TEMİZLİK ARACI"
+echo "======================="
+echo -e "${NC}"
+
+# Parametreleri kontrol et
+CLEAN_TYPE="temp"
+FORCE=false
+
+for arg in "$@"; do
+    case $arg in
+        logs)
+            CLEAN_TYPE="logs"
+            echo -e "${BLUE}📝 Log dosyaları temizlenecek${NC}"
+            ;;
+        cache)
+            CLEAN_TYPE="cache"
+            echo -e "${BLUE}💾 Cache dosyaları temizlenecek${NC}"
+            ;;
+        all)
+            CLEAN_TYPE="all"
+            echo -e "${BLUE}🧹 Tam temizlik yapılacak${NC}"
+            ;;
+        temp)
+            CLEAN_TYPE="temp"
+            echo -e "${BLUE}🗑️ Geçici dosyalar temizlenecek${NC}"
+            ;;
+        force|-f)
+            FORCE=true
+            echo -e "${YELLOW}⚠️ Zorla temizlik modu aktif${NC}"
+            ;;
+        help|-h|--help)
+            echo "Kullanım: oba-clean [temizlik tipi] [seçenekler]"
+            echo ""
+            echo "Temizlik Tipleri:"
+            echo "  temp              Geçici dosyalar (varsayılan)"
+            echo "  logs              Eski log dosyaları"
+            echo "  cache             Cache ve pycache dosyaları"
+            echo "  all               Tüm geçici dosyalar"
+            echo ""
+            echo "Seçenekler:"
+            echo "  force, -f         Onay istemeden temizle"
+            echo "  help              Bu yardımı göster"
+            echo ""
+            echo "Örnekler:"
+            echo "  oba-clean                 Geçici dosyaları temizle"
+            echo "  oba-clean logs            Eski logları temizle"
+            echo "  oba-clean all force       Tümünü zorla temizle"
+            exit 0
+            ;;
+        *)
+            echo -e "${RED}❌ Bilinmeyen parametre: $arg${NC}"
+            echo "Yardım için: oba-clean help"
+            exit 1
+            ;;
+    esac
+done
+
+# Yardımcı fonksiyonlar
+get_file_count_and_size() {
+    local pattern="$1"
+    local count=0
+    local size=0
+    
+    while IFS= read -r -d '' file; do
+        if [[ -f "$file" ]]; then
+            count=$((count + 1))
+            size=$((size + $(stat -f%z "$file" 2>/dev/null || stat -c%s "$file" 2>/dev/null || echo 0)))
+        fi
+    done < <(find . -name "$pattern" -type f -print0 2>/dev/null)
+    
+    echo "$count:$size"
+}
+
+format_size() {
+    local size=$1
+    if [[ $size -gt 1073741824 ]]; then
+        echo "$(( size / 1073741824 )) GB"
+    elif [[ $size -gt 1048576 ]]; then
+        echo "$(( size / 1048576 )) MB"
+    elif [[ $size -gt 1024 ]]; then
+        echo "$(( size / 1024 )) KB"
+    else
+        echo "$size bytes"
+    fi
+}
+
+confirm_action() {
+    local message="$1"
+    if $FORCE; then
+        return 0
+    fi
+    
+    echo -n "$message (y/N): "
+    read -r response
+    if [[ "$response" =~ ^[Yy]$ ]]; then
+        return 0
+    else
+        return 1
+    fi
+}
+
+clean_temp_files() {
+    echo -e "${CYAN}🗑️ GEÇİCİ DOSYA TEMİZLİĞİ${NC}"
+    echo "=========================="
+    
+    local total_files=0
+    local total_size=0
+    
+    # Python cache dosyaları
+    echo "🐍 Python cache dosyaları kontrol ediliyor..."
+    local pycache_info=$(get_file_count_and_size "__pycache__")
+    local pycache_count=$(echo "$pycache_info" | cut -d: -f1)
+    local pycache_size=$(echo "$pycache_info" | cut -d: -f2)
+    
+    if [[ $pycache_count -gt 0 ]]; then
+        echo "   📁 $pycache_count __pycache__ klasörü ($(format_size $pycache_size))"
+        total_files=$((total_files + pycache_count))
+        total_size=$((total_size + pycache_size))
+    fi
+    
+    # .pyc dosyaları
+    local pyc_info=$(get_file_count_and_size "*.pyc")
+    local pyc_count=$(echo "$pyc_info" | cut -d: -f1)
+    local pyc_size=$(echo "$pyc_info" | cut -d: -f2)
+    
+    if [[ $pyc_count -gt 0 ]]; then
+        echo "   🐍 $pyc_count .pyc dosyası ($(format_size $pyc_size))"
+        total_files=$((total_files + pyc_count))
+        total_size=$((total_size + pyc_size))
+    fi
+    
+    # Geçici test dosyaları
+    local tmp_info=$(get_file_count_and_size "*.tmp")
+    local tmp_count=$(echo "$tmp_info" | cut -d: -f1)
+    local tmp_size=$(echo "$tmp_info" | cut -d: -f2)
+    
+    if [[ $tmp_count -gt 0 ]]; then
+        echo "   📄 $tmp_count .tmp dosyası ($(format_size $tmp_size))"
+        total_files=$((total_files + tmp_count))
+        total_size=$((total_size + tmp_size))
+    fi
+    
+    # .DS_Store dosyaları (macOS)
+    if [[ "$(uname)" == "Darwin" ]]; then
+        local ds_info=$(get_file_count_and_size ".DS_Store")
+        local ds_count=$(echo "$ds_info" | cut -d: -f1)
+        local ds_size=$(echo "$ds_info" | cut -d: -f2)
+        
+        if [[ $ds_count -gt 0 ]]; then
+            echo "   🍎 $ds_count .DS_Store dosyası ($(format_size $ds_size))"
+            total_files=$((total_files + ds_count))
+            total_size=$((total_size + ds_size))
+        fi
+    fi
+    
+    if [[ $total_files -eq 0 ]]; then
+        echo -e "${GREEN}✅ Temizlenecek geçici dosya bulunamadı${NC}"
+        return 0
+    fi
+    
+    echo ""
+    echo -e "${YELLOW}📊 Toplam: $total_files dosya ($(format_size $total_size))${NC}"
+    
+    if confirm_action "Bu dosyaları silmek istediğinizden emin misiniz?"; then
+        echo ""
+        echo "🧹 Temizlik başlıyor..."
+        
+        # Python cache temizliği
+        if [[ $pycache_count -gt 0 ]]; then
+            find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
+            echo -e "${GREEN}✅ __pycache__ klasörleri temizlendi${NC}"
+        fi
+        
+        # .pyc dosyaları
+        if [[ $pyc_count -gt 0 ]]; then
+            find . -name "*.pyc" -delete 2>/dev/null || true
+            echo -e "${GREEN}✅ .pyc dosyaları temizlendi${NC}"
+        fi
+        
+        # .tmp dosyaları
+        if [[ $tmp_count -gt 0 ]]; then
+            find . -name "*.tmp" -delete 2>/dev/null || true
+            echo -e "${GREEN}✅ .tmp dosyaları temizlendi${NC}"
+        fi
+        
+        # .DS_Store dosyaları
+        if [[ "$(uname)" == "Darwin" ]] && [[ $ds_count -gt 0 ]]; then
+            find . -name ".DS_Store" -delete 2>/dev/null || true
+            echo -e "${GREEN}✅ .DS_Store dosyaları temizlendi${NC}"
+        fi
+        
+        echo -e "${GREEN}🎉 Geçici dosya temizliği tamamlandı!${NC}"
+    else
+        echo -e "${YELLOW}❌ Temizlik iptal edildi${NC}"
+    fi
+    
+    echo ""
+}
+
+clean_log_files() {
+    echo -e "${CYAN}📝 LOG DOSYA TEMİZLİĞİ${NC}"
+    echo "======================"
+    
+    if [[ ! -d "logs" ]]; then
+        echo -e "${YELLOW}📭 Log klasörü bulunamadı${NC}"
+        return 0
+    fi
+    
+    # 7 günden eski log dosyaları
+    local old_logs=$(find logs -name "*.log" -type f -mtime +7 2>/dev/null | wc -l)
+    local old_log_size=0
+    
+    if [[ $old_logs -gt 0 ]]; then
+        old_log_size=$(find logs -name "*.log" -type f -mtime +7 -exec stat -f%z {} + 2>/dev/null | awk '{sum+=$1} END {print sum}' || 
+                      find logs -name "*.log" -type f -mtime +7 -exec stat -c%s {} + 2>/dev/null | awk '{sum+=$1} END {print sum}' || echo 0)
+    fi
+    
+    # Büyük log dosyaları (>10MB)
+    local large_logs=$(find logs -name "*.log" -type f -size +10M 2>/dev/null | wc -l)
+    
+    # Rotated log dosyaları (.1, .2, etc.)
+    local rotated_logs=$(find logs -name "*.log.*" -type f 2>/dev/null | wc -l)
+    local rotated_log_size=0
+    
+    if [[ $rotated_logs -gt 0 ]]; then
+        rotated_log_size=$(find logs -name "*.log.*" -type f -exec stat -f%z {} + 2>/dev/null | awk '{sum+=$1} END {print sum}' || 
+                          find logs -name "*.log.*" -type f -exec stat -c%s {} + 2>/dev/null | awk '{sum+=$1} END {print sum}' || echo 0)
+    fi
+    
+    echo "📊 Log durumu:"
+    echo "   📅 7+ gün eski loglar: $old_logs dosya ($(format_size $old_log_size))"
+    echo "   📈 Büyük loglar (>10MB): $large_logs dosya"
+    echo "   🔄 Rotated loglar: $rotated_logs dosya ($(format_size $rotated_log_size))"
+    
+    local total_clean_files=$((old_logs + rotated_logs))
+    local total_clean_size=$((old_log_size + rotated_log_size))
+    
+    if [[ $total_clean_files -eq 0 ]]; then
+        echo -e "${GREEN}✅ Temizlenecek log dosyası bulunamadı${NC}"
+        
+        # Büyük dosyalar için uyarı
+        if [[ $large_logs -gt 0 ]]; then
+            echo -e "${YELLOW}💡 $large_logs büyük log dosyası mevcut, manuel kontrol edilebilir${NC}"
+        fi
+        
+        return 0
+    fi
+    
+    echo ""
+    echo -e "${YELLOW}📊 Temizlenecek: $total_clean_files dosya ($(format_size $total_clean_size))${NC}"
+    
+    if confirm_action "Bu log dosyalarını silmek istediğinizden emin misiniz?"; then
+        echo ""
+        echo "🧹 Log temizliği başlıyor..."
+        
+        # Eski log dosyalarını sil
+        if [[ $old_logs -gt 0 ]]; then
+            find logs -name "*.log" -type f -mtime +7 -delete 2>/dev/null || true
+            echo -e "${GREEN}✅ Eski log dosyaları temizlendi${NC}"
+        fi
+        
+        # Rotated log dosyalarını sil
+        if [[ $rotated_logs -gt 0 ]]; then
+            find logs -name "*.log.*" -type f -delete 2>/dev/null || true
+            echo -e "${GREEN}✅ Rotated log dosyaları temizlendi${NC}"
+        fi
+        
+        # Büyük log dosyalarını truncate et
+        if [[ $large_logs -gt 0 ]]; then
+            echo -n "Büyük log dosyalarını kısaltmak ister misiniz? (y/N): "
+            if $FORCE || { read -r response && [[ "$response" =~ ^[Yy]$ ]]; }; then
+                find logs -name "*.log" -type f -size +10M -exec truncate -s 1M {} \; 2>/dev/null || true
+                echo -e "${GREEN}✅ Büyük log dosyaları kısaltıldı${NC}"
+            fi
+        fi
+        
+        echo -e "${GREEN}🎉 Log temizliği tamamlandı!${NC}"
+    else
+        echo -e "${YELLOW}❌ Log temizliği iptal edildi${NC}"
+    fi
+    
+    echo ""
+}
+
+clean_cache_files() {
+    echo -e "${CYAN}💾 CACHE TEMİZLİĞİ${NC}"
+    echo "=================="
+    
+    local total_files=0
+    local total_size=0
+    
+    # Python __pycache__ klasörleri
+    local pycache_dirs=$(find . -type d -name "__pycache__" 2>/dev/null | wc -l)
+    if [[ $pycache_dirs -gt 0 ]]; then
+        local pycache_size=$(find . -type d -name "__pycache__" -exec du -sb {} + 2>/dev/null | awk '{sum+=$1} END {print sum}' || echo 0)
+        echo "   🐍 $pycache_dirs __pycache__ klasörü ($(format_size $pycache_size))"
+        total_files=$((total_files + pycache_dirs))
+        total_size=$((total_size + pycache_size))
+    fi
+    
+    # pytest cache
+    if [[ -d ".pytest_cache" ]]; then
+        local pytest_size=$(du -sb .pytest_cache 2>/dev/null | cut -f1 || echo 0)
+        echo "   🧪 pytest cache ($(format_size $pytest_size))"
+        total_files=$((total_files + 1))
+        total_size=$((total_size + pytest_size))
+    fi
+    
+    # Coverage dosyaları
+    local coverage_files=0
+    for file in .coverage htmlcov/; do
+        if [[ -e "$file" ]]; then
+            coverage_files=$((coverage_files + 1))
+            if [[ -f "$file" ]]; then
+                local file_size=$(stat -f%z "$file" 2>/dev/null || stat -c%s "$file" 2>/dev/null || echo 0)
+                total_size=$((total_size + file_size))
+            elif [[ -d "$file" ]]; then
+                local dir_size=$(du -sb "$file" 2>/dev/null | cut -f1 || echo 0)
+                total_size=$((total_size + dir_size))
+            fi
+        fi
+    done
+    
+    if [[ $coverage_files -gt 0 ]]; then
+        echo "   📊 $coverage_files coverage dosyası"
+        total_files=$((total_files + coverage_files))
+    fi
+    
+    # Node modules (eğer varsa)
+    if [[ -d "node_modules" ]]; then
+        local node_size=$(du -sb node_modules 2>/dev/null | cut -f1 || echo 0)
+        echo "   📦 node_modules ($(format_size $node_size))"
+        total_files=$((total_files + 1))
+        total_size=$((total_size + node_size))
+    fi
+    
+    if [[ $total_files -eq 0 ]]; then
+        echo -e "${GREEN}✅ Temizlenecek cache dosyası bulunamadı${NC}"
+        return 0
+    fi
+    
+    echo ""
+    echo -e "${YELLOW}📊 Toplam: $total_files öğe ($(format_size $total_size))${NC}"
+    
+    if confirm_action "Bu cache dosyalarını silmek istediğinizden emin misiniz?"; then
+        echo ""
+        echo "🧹 Cache temizliği başlıyor..."
+        
+        # Python cache temizliği
+        if [[ $pycache_dirs -gt 0 ]]; then
+            find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
+            echo -e "${GREEN}✅ Python cache temizlendi${NC}"
+        fi
+        
+        # pytest cache
+        if [[ -d ".pytest_cache" ]]; then
+            rm -rf .pytest_cache
+            echo -e "${GREEN}✅ pytest cache temizlendi${NC}"
+        fi
+        
+        # Coverage dosyaları
+        if [[ $coverage_files -gt 0 ]]; then
+            rm -f .coverage 2>/dev/null || true
+            rm -rf htmlcov 2>/dev/null || true
+            echo -e "${GREEN}✅ Coverage dosyaları temizlendi${NC}"
+        fi
+        
+        # Node modules
+        if [[ -d "node_modules" ]]; then
+            echo -n "node_modules klasörünü silmek istediğinizden emin misiniz? (y/N): "
+            if $FORCE || { read -r response && [[ "$response" =~ ^[Yy]$ ]]; }; then
+                rm -rf node_modules
+                echo -e "${GREEN}✅ node_modules temizlendi${NC}"
+            fi
+        fi
+        
+        echo -e "${GREEN}🎉 Cache temizliği tamamlandı!${NC}"
+    else
+        echo -e "${YELLOW}❌ Cache temizliği iptal edildi${NC}"
+    fi
+    
+    echo ""
+}
+
+clean_all() {
+    echo -e "${CYAN}🧹 TAM TEMİZLİK${NC}"
+    echo "================"
+    echo ""
+    
+    clean_temp_files
+    clean_cache_files
+    clean_log_files
+    
+    echo -e "${GREEN}🎉 Tam temizlik tamamlandı!${NC}"
+}
+
+# Ana kontrol akışı
+case $CLEAN_TYPE in
+    "temp")
+        clean_temp_files
+        ;;
+    "logs")
+        clean_log_files
+        ;;
+    "cache")
+        clean_cache_files
+        ;;
+    "all")
+        clean_all
+        ;;
+esac
+
+# Son durum
+echo -e "${CYAN}💡 YARALI KOMUTLAR:${NC}"
+echo "  oba-clean temp            Geçici dosyaları temizle"
+echo "  oba-clean logs            Eski logları temizle"
+echo "  oba-clean cache           Cache dosyalarını temizle"
+echo "  oba-clean all force       Tümünü zorla temizle"
+echo ""
+echo -e "${GREEN}✨ Temizlik işlemi tamamlandı!${NC}"

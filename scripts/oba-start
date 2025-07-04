@@ -1,0 +1,412 @@
+#!/bin/bash
+# OBA Robot Geliştirilmiş Başlatma Scripti
+
+set -e
+
+# Renkli çıktı
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+NC='\033[0m'
+
+# Banner
+echo -e "${CYAN}"
+echo "  ██████╗ ██████╗  █████╗ "
+echo " ██╔═══██╗██╔══██╗██╔══██╗"
+echo " ██║   ██║██████╔╝███████║"
+echo " ██║   ██║██╔══██╗██╔══██║"
+echo " ╚██████╔╝██████╔╝██║  ██    # Adımları çalıştır
+    check_requirements
+    check_system_dependencies
+    create_directories
+    check_config_files
+    setup_virtual_environment
+    install_packages
+    test_environment          # 🆕 Ortam testi eklendi
+    check_robot_status"  ╚═════╝ ╚═════╝ ╚═╝  ╚═╝"
+echo -e "${NC}"
+echo -e "${GREEN}🤖 Hacı Abi'nin OBA Robot'u Başlatılıyor...${NC}"
+echo "=================================================="
+
+# Parametreler
+SIMULATION_MODE=false
+DEBUG_MODE=false
+HELP_MODE=false
+
+# Parametre parsing
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --sim|--simulation)
+            SIMULATION_MODE=true
+            shift
+            ;;
+        --debug|-d)
+            DEBUG_MODE=true
+            shift
+            ;;
+        --help|-h)
+            HELP_MODE=true
+            shift
+            ;;
+        *)
+            echo -e "${YELLOW}⚠️ Bilinmeyen parametre: $1${NC}"
+            shift
+            ;;
+    esac
+done
+
+# Yardım göster
+if [ "$HELP_MODE" = true ]; then
+    echo -e "${BLUE}📖 OBA Robot Kullanımı:${NC}"
+    echo "  oba-start [seçenekler]"
+    echo ""
+    echo "Seçenekler:"
+    echo "  --sim, --simulation    Simülasyon modunda başlat"
+    echo "  --debug, -d           Debug modunda başlat"
+    echo "  --help, -h            Bu yardım mesajını göster"
+    echo ""
+    echo "Örnekler:"
+    echo "  oba-start              Normal mod"
+    echo "  oba-start --sim        Simülasyon modu"
+    echo "  oba-start --debug      Debug modu"
+    echo "  oba-start --sim -d     Simülasyon + Debug"
+    exit 0
+fi
+
+# Sistem gereksinimleri kontrol et
+check_requirements() {
+    echo -e "${BLUE}🔍 Sistem gereksinimleri kontrol ediliyor...${NC}"
+
+    # Python kontrolü
+    if ! command -v python3 &> /dev/null; then
+        echo -e "${RED}❌ Python3 bulunamadı!${NC}"
+        exit 1
+    fi
+
+    PYTHON_VERSION=$(python3 --version | cut -d' ' -f2)
+    echo -e "${GREEN}✅ Python: $PYTHON_VERSION${NC}"
+
+    # pip kontrolü
+    if ! command -v pip3 &> /dev/null; then
+        echo -e "${RED}❌ pip3 bulunamadı!${NC}"
+        exit 1
+    fi
+
+    # Git kontrolü
+    if ! command -v git &> /dev/null; then
+        echo -e "${YELLOW}⚠️ Git bulunamadı (isteğe bağlı)${NC}"
+    else
+        echo -e "${GREEN}✅ Git mevcut${NC}"
+    fi
+
+    # Disk alanı kontrolü
+    AVAILABLE_SPACE=$(df . | tail -1 | awk '{print $4}')
+    if [ "$AVAILABLE_SPACE" -lt 1000000 ]; then  # 1GB
+        echo -e "${YELLOW}⚠️ Disk alanı azalıyor: $(df -h . | tail -1 | awk '{print $4}')${NC}"
+    fi
+}
+
+# Sistem bağımlılıklarını kontrol et ve kur
+check_system_dependencies() {
+    echo -e "${BLUE}🔧 Sistem bağımlılıkları kontrol ediliyor...${NC}"
+
+    # Gerekli sistem paketleri
+    REQUIRED_PACKAGES=(
+        "build-essential"
+        "python3-dev"
+        "python3-venv"
+        "libcap-dev"
+        "libffi-dev"
+        "libssl-dev"
+        "libjpeg-dev"
+        "libpng-dev"
+        "libavformat-dev"
+        "libavcodec-dev"
+        "libavdevice-dev"
+        "libavutil-dev"
+        "libswscale-dev"
+        "libswresample-dev"
+        "libavfilter-dev"
+        "pkg-config"
+    )
+
+    MISSING_PACKAGES=()
+
+    # Eksik paketleri kontrol et
+    for package in "${REQUIRED_PACKAGES[@]}"; do
+        if ! dpkg -l | grep -q "^ii  $package "; then
+            MISSING_PACKAGES+=("$package")
+        fi
+    done
+
+    # Eksik paketler varsa kur
+    if [ ${#MISSING_PACKAGES[@]} -gt 0 ]; then
+        echo -e "${YELLOW}⚠️ Eksik sistem paketleri: ${MISSING_PACKAGES[*]}${NC}"
+
+        # Sudo kontrolü
+        if [ "$EUID" -ne 0 ]; then
+            echo -e "${BLUE}🔐 Sistem paketleri kurmak için sudo yetkisi gerekli${NC}"
+
+            # Kullanıcı onayı al
+            read -p "Eksik paketleri kurmak istiyor musunuz? (y/n): " -n 1 -r
+            echo
+
+            if [[ $REPLY =~ ^[Yy]$ ]]; then
+                echo -e "${BLUE}📦 Eksik paketler kuruluyor...${NC}"
+
+                # Paket listesini güncelle
+                sudo apt update || {
+                    echo -e "${YELLOW}⚠️ apt update başarısız, devam ediliyor...${NC}"
+                }
+
+                # Paketleri kur
+                sudo apt install -y "${MISSING_PACKAGES[@]}" || {
+                    echo -e "${RED}❌ Bazı sistem paketleri kurulamadı!${NC}"
+                    echo -e "${YELLOW}💡 Manuel olarak kurmayı deneyin:${NC}"
+                    echo "sudo apt install -y ${MISSING_PACKAGES[*]}"
+                    exit 1
+                }
+
+                echo -e "${GREEN}✅ Sistem paketleri kuruldu${NC}"
+            else
+                echo -e "${RED}❌ Sistem paketleri olmadan robot çalışmayabilir!${NC}"
+                echo -e "${YELLOW}💡 Manuel kurulum:${NC}"
+                echo "sudo apt install -y ${MISSING_PACKAGES[*]}"
+
+                # Devam etmek istiyor mu?
+                read -p "Yine de devam etmek istiyor musunuz? (y/n): " -n 1 -r
+                echo
+
+                if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+                    echo -e "${YELLOW}👋 İptal edildi${NC}"
+                    exit 0
+                fi
+            fi
+        else
+            # Root ise direkt kur
+            echo -e "${BLUE}📦 Eksik paketler kuruluyor...${NC}"
+            apt update && apt install -y "${MISSING_PACKAGES[@]}"
+        fi
+    else
+        echo -e "${GREEN}✅ Tüm sistem bağımlılıkları mevcut${NC}"
+    fi
+}
+
+# Gerekli dizinleri oluştur
+create_directories() {
+    echo -e "${BLUE}📁 Dizinler kontrol ediliyor...${NC}"
+
+    REQUIRED_DIRS=("logs" "data" "config" "models" "data/maps" "data/sensor_data")
+
+    for dir in "${REQUIRED_DIRS[@]}"; do
+        if [ ! -d "$dir" ]; then
+            echo -e "${YELLOW}📁 $dir dizini oluşturuluyor...${NC}"
+            mkdir -p "$dir"
+        fi
+    done
+
+    echo -e "${GREEN}✅ Dizinler hazır${NC}"
+}
+
+# Config dosyalarını kontrol et
+check_config_files() {
+    echo -e "${BLUE}⚙️ Konfigürasyon dosyaları kontrol ediliyor...${NC}"
+
+    # Ana config dosyası
+    if [ ! -f "config/robot_config.yaml" ]; then
+        echo -e "${YELLOW}📄 Varsayılan config dosyası oluşturuluyor...${NC}"
+        cp "config/robot_config.yaml.example" "config/robot_config.yaml" 2>/dev/null || {
+            echo -e "${RED}❌ Varsayılan config dosyası bulunamadı!${NC}"
+            echo -e "${YELLOW}💡 config/robot_config.yaml.example dosyasını oluşturun${NC}"
+            exit 1
+        }
+    fi
+
+    # Log config
+    if [ ! -f "config/logging.yaml" ]; then
+        echo -e "${YELLOW}📄 Varsayılan log config oluşturuluyor...${NC}"
+        cp "config/logging.yaml.example" "config/logging.yaml" 2>/dev/null || {
+            echo -e "${YELLOW}⚠️ Log config bulunamadı, varsayılan kullanılacak${NC}"
+        }
+    fi
+
+    echo -e "${GREEN}✅ Config dosyaları hazır${NC}"
+}
+
+# Virtual environment setup
+setup_virtual_environment() {
+    echo -e "${BLUE}🐍 Python virtual environment kontrol ediliyor...${NC}"
+
+    if [ ! -d "venv" ]; then
+        echo -e "${YELLOW}🐍 Virtual environment oluşturuluyor...${NC}"
+        python3 -m venv venv || {
+            echo -e "${RED}❌ Virtual environment oluşturulamadı!${NC}"
+            echo -e "${YELLOW}💡 python3-venv paketini kurun: sudo apt install python3-venv${NC}"
+            exit 1
+        }
+    fi
+
+    # Activate
+    source venv/bin/activate
+
+    # Pip upgrade
+    echo -e "${BLUE}📦 pip güncelleniyor...${NC}"
+    pip install --upgrade pip --quiet || {
+        echo -e "${YELLOW}⚠️ pip güncellenemedi, devam ediliyor...${NC}"
+    }
+
+    echo -e "${GREEN}✅ Virtual environment hazır${NC}"
+}
+
+# Paket kurulumu
+install_packages() {
+    echo -e "${BLUE}📦 Python paketleri kontrol ediliyor...${NC}"
+
+    if [ ! -f "requirements.txt" ]; then
+        echo -e "${RED}❌ requirements.txt bulunamadı!${NC}"
+        exit 1
+    fi
+
+    echo -e "${BLUE}📦 Gerekli paketler kuruluyor...${NC}"
+
+    # Önce wheel kurulumu
+    pip install wheel --quiet || {
+        echo -e "${YELLOW}⚠️ wheel kurulamadı, devam ediliyor...${NC}"
+    }
+
+    # Ana paketleri kur
+    pip install -r requirements.txt --verbose || {
+        echo -e "${RED}❌ Paket kurulumu başarısız!${NC}"
+        echo -e "${YELLOW}💡 Çözüm önerileri:${NC}"
+        echo "  1. sudo apt install -y libcap-dev build-essential python3-dev"
+        echo "  2. pip install --upgrade pip"
+        echo "  3. pip install -r requirements.txt --no-cache-dir"
+        echo "  4. pip install -r requirements.txt --no-binary :all:"
+        echo ""
+        echo -e "${BLUE}🔧 Detaylı hata için:${NC}"
+        echo "  pip install -r requirements.txt --verbose"
+
+        # Otomatik düzeltme dene
+        echo -e "${YELLOW}⚠️ Otomatik düzeltme deneniyor...${NC}"
+
+        # Cache temizle ve tekrar dene
+        pip cache purge 2>/dev/null || true
+        pip install -r requirements.txt --no-cache-dir --quiet || {
+            echo -e "${RED}❌ Otomatik düzeltme de başarısız!${NC}"
+            echo -e "${YELLOW}💡 Manuel olarak şu komutu çalıştırın:${NC}"
+            echo "sudo apt install -y libcap-dev build-essential python3-dev"
+            echo "pip install -r requirements.txt"
+            exit 1
+        }
+    }
+
+    echo -e "${GREEN}✅ Paketler hazır${NC}"
+}
+
+# Robot durumu kontrol et
+check_robot_status() {
+    echo -e "${BLUE}🤖 Robot durumu kontrol ediliyor...${NC}"
+
+    # Önceki çalışan instance var mı?
+    if [ -f "logs/robot.pid" ]; then
+        OLD_PID=$(cat logs/robot.pid)
+        if ps -p "$OLD_PID" > /dev/null 2>&1; then
+            echo -e "${YELLOW}⚠️ Robot zaten çalışıyor! PID: $OLD_PID${NC}"
+            read -p "Yeniden başlatmak istiyor musunuz? (y/n): " -n 1 -r
+            echo
+            if [[ $REPLY =~ ^[Yy]$ ]]; then
+                echo -e "${BLUE}🔄 Mevcut robot durduruluyor...${NC}"
+                kill "$OLD_PID" 2>/dev/null || true
+                sleep 2
+            else
+                echo -e "${GREEN}👋 İptal edildi${NC}"
+                exit 0
+            fi
+        else
+            # Eski PID dosyasını temizle
+            rm -f logs/robot.pid
+        fi
+    fi
+
+    echo -e "${GREEN}✅ Robot durumu uygun${NC}"
+}
+
+# Ortam tespiti ve test
+test_environment() {
+    echo -e "${BLUE}🧪 Ortam uyumluluğu test ediliyor...${NC}"
+
+    # Environment test script'i çalıştır
+    python3 test_environment.py --quiet || {
+        echo -e "${YELLOW}⚠️ Ortam testleri başarısız, devam etmek istiyor musunuz?${NC}"
+        read -p "(y/n): " -n 1 -r
+        echo
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            echo -e "${GREEN}👋 İptal edildi${NC}"
+            exit 0
+        fi
+    }
+
+    echo -e "${GREEN}✅ Ortam uyumlu${NC}"
+}
+
+# Ana program başlat
+start_robot() {
+    echo -e "${GREEN}🚀 OBA Robot başlatılıyor...${NC}"
+
+    # Parametreleri hazırla
+    ARGS=()
+
+    if [ "$SIMULATION_MODE" = true ]; then
+        ARGS+=("--simulation")
+        echo -e "${CYAN}🎮 Simülasyon modu aktif${NC}"
+    fi
+
+    if [ "$DEBUG_MODE" = true ]; then
+        ARGS+=("--debug")
+        echo -e "${CYAN}🐛 Debug modu aktif${NC}"
+    fi
+
+    echo -e "${BLUE}⚡ Başlatma parametreleri: ${ARGS[*]}${NC}"
+    echo "=================================================="
+
+    # Ana programı çalıştır
+    python3 main.py "${ARGS[@]}" || {
+        echo -e "${RED}❌ Robot başlatma başarısız!${NC}"
+        echo -e "${YELLOW}💡 Log dosyasını kontrol edin: logs/robot.log${NC}"
+        exit 1
+    }
+}
+
+# Ana fonksiyon
+main() {
+    # Başlangıç zamanı
+    START_TIME=$(date +%s)
+
+    # Adımları çalıştır
+    check_requirements
+    check_system_dependencies  # 🆕 Yeni eklenen
+    create_directories
+    check_config_files
+    setup_virtual_environment
+    install_packages
+    check_robot_status
+    test_environment
+
+    # Hazırlık süresi
+    END_TIME=$(date +%s)
+    PREP_TIME=$((END_TIME - START_TIME))
+
+    echo -e "${GREEN}✅ Hazırlık tamamlandı! ($PREP_TIME saniye)${NC}"
+    echo ""
+
+    # Robot'u başlat
+    start_robot
+}
+
+# Ctrl+C ile temiz çıkış
+trap 'echo -e "\n${YELLOW}👋 OBA Robot kapatılıyor...${NC}"; exit 0' INT
+
+# Ana fonksiyonu çalıştır
+main "$@"

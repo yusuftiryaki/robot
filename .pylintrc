@@ -1,0 +1,44 @@
+[MESSAGES CONTROL]
+# Disable specific pylint warnings that are annoying during development
+disable=
+    # Import warnings
+    import-error,
+    no-name-in-module,
+    # Formatting warnings
+    line-too-long,
+    trailing-whitespace,
+    # Exception handling
+    broad-except,
+    # Logging
+    logging-format-interpolation,
+    logging-fstring-interpolation,
+    # Unused variables/imports
+    unused-import,
+    unused-variable,
+    unused-argument,
+    # Other annoying ones
+    too-many-locals,
+    too-many-arguments,
+    too-many-instance-attributes,
+    too-few-public-methods,
+    # OpenCV/Hardware specific
+    no-member,
+    # Async/await
+    not-an-iterable,
+    # Type hints
+    unsubscriptable-object
+
+[FORMAT]
+max-line-length = 120
+
+[BASIC]
+# Allow shorter names for common variables
+good-names = i,j,k,ex,Run,_,x,y,z,id,dt,ax,ay,az,gx,gy,gz
+
+[DESIGN]
+# Relax design constraints
+max-args = 10
+max-locals = 20
+max-returns = 10
+max-branches = 20
+max-statements = 60
