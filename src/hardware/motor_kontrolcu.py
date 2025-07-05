@@ -148,39 +148,57 @@ class MotorKontrolcu:
 
             GPIO.setmode(GPIO.BCM)
 
+            # Config'ten motor ayarlarını al
+            left_config = self.config.get("left_wheel", {})
+            right_config = self.config.get("right_wheel", {})
+            main_brush_config = self.config.get("main_brush", {})
+            side_left_config = self.config.get("side_brush_left", {})
+            side_right_config = self.config.get("side_brush_right", {})
+            fan_config = self.config.get("fan", {})
+
+            # Motor hız limitleri
+            self.motor_limits = {
+                "left_wheel": left_config.get("max_speed", 255),
+                "right_wheel": right_config.get("max_speed", 255),
+                "main_brush": main_brush_config.get("max_speed", 200),
+                "side_brush_left": side_left_config.get("max_speed", 150),
+                "side_brush_right": side_right_config.get("max_speed", 150),
+                "fan": fan_config.get("max_speed", 180)
+            }
+
             # Tekerlek motorları
             self.sol_motor = Motor(
-                forward=self.config.get("left_wheel", {}).get("pin_a", 18),
-                backward=self.config.get("left_wheel", {}).get("pin_b", 19)
+                forward=left_config.get("pin_a", 18),
+                backward=left_config.get("pin_b", 19)
             )
             self.sag_motor = Motor(
-                forward=self.config.get("right_wheel", {}).get("pin_a", 21),
-                backward=self.config.get("right_wheel", {}).get("pin_b", 22)
+                forward=right_config.get("pin_a", 21),
+                backward=right_config.get("pin_b", 22)
             )
 
             # Fırça motorları
             self.ana_firca_motor = Motor(
-                forward=self.config.get("main_brush", {}).get("pin_a", 24),
-                backward=self.config.get("main_brush", {}).get("pin_b", 25)
+                forward=main_brush_config.get("pin_a", 24),
+                backward=main_brush_config.get("pin_b", 25)
             )
             self.sol_firca_motor = Motor(
-                forward=self.config.get("side_brush_left", {}).get("pin_a", 26),
-                backward=self.config.get("side_brush_left", {}).get("pin_b", 27)
+                forward=side_left_config.get("pin_a", 26),
+                backward=side_left_config.get("pin_b", 27)
             )
             self.sag_firca_motor = Motor(
-                forward=self.config.get("side_brush_right", {}).get("pin_a", 5),
-                backward=self.config.get("side_brush_right", {}).get("pin_b", 6)
+                forward=side_right_config.get("pin_a", 5),
+                backward=side_right_config.get("pin_b", 6)
             )
 
             # Fan motoru
             self.fan_motor = Motor(
-                forward=self.config.get("fan", {}).get("pin_a", 12),
-                backward=self.config.get("fan", {}).get("pin_b", 13)
+                forward=fan_config.get("pin_a", 12),
+                backward=fan_config.get("pin_b", 13)
             )
 
-            # Enkoder pinleri
-            self.sol_enkoder_pin = self.config.get("left_wheel", {}).get("encoder_pin", 20)
-            self.sag_enkoder_pin = self.config.get("right_wheel", {}).get("encoder_pin", 23)
+            # Enkoder pinleri ve interrupt'lar
+            self.sol_enkoder_pin = left_config.get("encoder_pin", 20)
+            self.sag_enkoder_pin = right_config.get("encoder_pin", 23)
 
             GPIO.setup(self.sol_enkoder_pin, GPIO.IN, pull_up_down=GPIO.PUD_UP)
             GPIO.setup(self.sag_enkoder_pin, GPIO.IN, pull_up_down=GPIO.PUD_UP)
@@ -190,6 +208,8 @@ class MotorKontrolcu:
             GPIO.add_event_detect(self.sag_enkoder_pin, GPIO.RISING, callback=self._sag_enkoder_callback)
 
             self.logger.info("✅ Fiziksel motorlar hazır!")
+            self.logger.info(f"📊 Motor limitleri: {self.motor_limits}")
+            self.logger.info(f"🔧 Enkoder pinleri: Sol-{self.sol_enkoder_pin}, Sağ-{self.sag_enkoder_pin}")
 
         except Exception as e:
             self.logger.error(f"❌ Motor başlatma hatası: {e}")
@@ -270,20 +290,28 @@ class MotorKontrolcu:
         self.logger.debug(f"🎮 Simülasyon motor: sol={sol_hiz:.2f}, sag={sag_hiz:.2f}")
 
     async def _real_motor_control(self, sol_hiz: float, sag_hiz: float):
-        """Gerçek motor kontrolü"""
+        """Gerçek motor kontrolü - Config'ten max_speed'i kullan"""
+        # Hız değerlerini motor limitlerinde tut ve int'e çevir
+        left_limit = self.motor_limits.get("left_wheel", 255)
+        right_limit = self.motor_limits.get("right_wheel", 255)
+
+        # Hızları PWM değerlerine dönüştür (0-1 range -> 0-max_speed)
+        sol_pwm = int(abs(sol_hiz) * left_limit)
+        sag_pwm = int(abs(sag_hiz) * right_limit)
+
         # Sol motor
         if sol_hiz > 0:
-            self.sol_motor.forward(abs(sol_hiz))
+            self.sol_motor.forward(sol_pwm)
         elif sol_hiz < 0:
-            self.sol_motor.backward(abs(sol_hiz))
+            self.sol_motor.backward(sol_pwm)
         else:
             self.sol_motor.stop()
 
         # Sağ motor
         if sag_hiz > 0:
-            self.sag_motor.forward(abs(sag_hiz))
+            self.sag_motor.forward(sag_pwm)
         elif sag_hiz < 0:
-            self.sag_motor.backward(abs(sag_hiz))
+            self.sag_motor.backward(sag_pwm)
         else:
             self.sag_motor.stop()
 
@@ -319,36 +347,40 @@ class MotorKontrolcu:
             await self._yan_fircalari_calistir(False)
 
     async def _ana_firca_calistir(self, aktif: bool):
-        """Ana fırçayı çalıştır/durdur"""
+        """Ana fırçayı çalıştır/durdur - Config'ten max_speed kullan"""
         if self.simulation_mode:
             self.logger.debug(f"🎮 Ana fırça simülasyon: {aktif}")
         else:
             if aktif:
-                self.ana_firca_motor.forward(0.8)  # %80 hız
+                main_brush_speed = int(self.motor_limits.get("main_brush", 200) * 0.8)  # %80 hız
+                self.ana_firca_motor.forward(main_brush_speed)
             else:
                 self.ana_firca_motor.stop()
 
     async def _yan_fircalari_calistir(self, aktif: bool):
-        """Yan fırçaları çalıştır/durdur"""
+        """Yan fırçaları çalıştır/durdur - Config'ten max_speed kullan"""
         if self.simulation_mode:
             self.logger.debug(f"🎮 Yan fırçalar simülasyon: {aktif}")
         else:
             if aktif:
-                self.sol_firca_motor.forward(0.6)  # %60 hız
-                self.sag_firca_motor.forward(0.6)  # %60 hız
+                side_left_speed = int(self.motor_limits.get("side_brush_left", 150) * 0.6)  # %60 hız
+                side_right_speed = int(self.motor_limits.get("side_brush_right", 150) * 0.6)  # %60 hız
+                self.sol_firca_motor.forward(side_left_speed)
+                self.sag_firca_motor.forward(side_right_speed)
             else:
                 self.sol_firca_motor.stop()
                 self.sag_firca_motor.stop()
 
     async def fan_calistir(self, aktif: bool):
-        """🌬️ Fan'ı çalıştır/durdur"""
+        """🌬️ Fan'ı çalıştır/durdur - Config'ten max_speed kullan"""
         self.fan_durumu = aktif
 
         if self.simulation_mode:
             self.logger.debug(f"🎮 Fan simülasyon: {aktif}")
         else:
             if aktif:
-                self.fan_motor.forward(0.7)  # %70 hız
+                fan_speed = int(self.motor_limits.get("fan", 180) * 0.7)  # %70 hız
+                self.fan_motor.forward(fan_speed)
             else:
                 self.fan_motor.stop()
 

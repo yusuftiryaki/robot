@@ -8,15 +8,13 @@ Durum makinesi prensibi ile çalışır - güvenli ve öngörülebilir.
 
 import asyncio
 import logging
-import time
 from datetime import datetime
 from enum import Enum
-from typing import Any, Dict, Optional
-
-import yaml
+from typing import Any, Dict
 
 from ai.karar_verici import KararVerici
 from core.guvenlik_sistemi import GuvenlikSistemi
+from core.smart_config import load_smart_config
 from hardware.motor_kontrolcu import MotorKontrolcu
 from hardware.sensor_okuyucu import SensorOkuyucu
 from navigation.konum_takipci import KonumTakipci
@@ -49,12 +47,19 @@ class BahceRobotu:
 
     def __init__(self, config_path: str = "config/robot_config.yaml"):
         """Robot'u başlat"""
-        self.config = self._load_config(config_path)
+        # Önce temel durumları ayarla
         self.durum = RobotDurumu.BASLANGIC
         self.onceki_durum = None
 
-        # Logging kurulumu
-        self._setup_logging()
+        # Logger'ı global setup'tan al - kendi logging setup yapmıyoruz!
+        self.logger = logging.getLogger("BahceRobotu")
+
+        # Akıllı config yükle
+        self.config = self._load_config(config_path)
+
+        # Akıllı config bilgilerini göster
+        self._log_smart_config_info()
+
         self.logger.info("🤖 Hacı Abi'nin Bahçe Asistanı (OBA) başlatılıyor...")
 
         # Alt sistemleri başlat
@@ -69,35 +74,70 @@ class BahceRobotu:
         self.calisma_durumu = True
 
     def _load_config(self, config_path: str) -> Dict[str, Any]:
-        """Konfigürasyon dosyasını yükle"""
+        """Akıllı konfigürasyon yükleme - Ortam bazlı"""
         try:
-            with open(config_path, 'r', encoding='utf-8') as f:
-                return yaml.safe_load(f)
-        except FileNotFoundError:
-            print(f"⚠️  Konfigürasyon dosyası bulunamadı: {config_path}")
+            # 🧠 Akıllı config yükleme - Ortam tespiti ile
+            self.logger.info("🧠 Akıllı konfigürasyon yükleniyor...")
+            config = load_smart_config(config_path)
+
+            # Ortam bilgilerini logla
+            runtime_info = config.get("runtime", {})
+            env_type = runtime_info.get("environment_type", "unknown")
+            is_sim = runtime_info.get("is_simulation", False)
+
+            self.logger.info(f"🌍 Tespit edilen ortam: {env_type}")
+            self.logger.info(f"🎮 Simülasyon modu: {'Evet' if is_sim else 'Hayır'}")
+
+            # Donanım yeteneklerini logla
+            capabilities = runtime_info.get("capabilities", {})
+            active_caps = [cap for cap, available in capabilities.items() if available]
+            if active_caps:
+                self.logger.info(f"🔧 Aktif donanım: {', '.join(active_caps)}")
+
+            return config
+
+        except Exception as e:
+            self.logger.error(f"❌ Akıllı config yükleme hatası: {e}")
+            self.logger.warning("⚠️ Varsayılan config'e geri döndü")
             return self._get_default_config()
 
     def _get_default_config(self) -> Dict[str, Any]:
-        """Varsayılan konfigürasyon"""
+        """Varsayılan konfigürasyon - Akıllı config başarısız olursa"""
+        self.logger.warning("⚠️ Akıllı config başarısız, varsayılan ayarlar kullanılıyor")
         return {
-            "robot": {"name": "Haci_Abi_Robot", "debug_mode": True},
-            "logging": {"level": "INFO", "file": "logs/robot.log"}
+            "robot": {
+                "name": "OBA_Emergency",
+                "version": "1.0.0",
+                "debug_mode": True
+            },
+            "simulation": {
+                "enabled": True  # Güvenli varsayılan
+            },
+            "motors": {
+                "type": "simulation"  # Güvenli varsayılan
+            },
+            "sensors": {
+                "mock_enabled": True  # Güvenli varsayılan
+            },
+            "logging": {
+                "level": "INFO",
+                "console": {"enabled": True},
+                "file": {"enabled": True, "path": "logs/robot.log"}
+            },
+            "web_interface": {
+                "enabled": True,
+                "host": "127.0.0.1",
+                "port": 5000,
+                "debug": True
+            },
+            "runtime": {
+                "environment_type": "unknown",
+                "is_simulation": True,
+                "is_hardware": False,
+                "capabilities": {},
+                "detected_at": "emergency_fallback"
+            }
         }
-
-    def _setup_logging(self):
-        """Logging sistemini kur"""
-        log_config = self.config.get("logging", {})
-        level = getattr(logging, log_config.get("level", "INFO"))
-
-        logging.basicConfig(
-            level=level,
-            format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-            handlers=[
-                logging.FileHandler(log_config.get("file", "logs/robot.log")),
-                logging.StreamHandler()
-            ]
-        )
-        self.logger = logging.getLogger("BahceRobotu")
 
     def _init_subsystems(self):
         """Alt sistemleri başlat"""
@@ -114,7 +154,8 @@ class BahceRobotu:
 
         try:
             self.sensor_okuyucu = SensorOkuyucu(
-                self.config.get("hardware", {}).get("sensors", {}))
+                self.config.get("hardware", {}).get("sensors", {}),
+                smart_config=self.config)
             self.logger.info("✅ Sensör okuyucu hazır")
         except Exception as e:
             self.logger.error(f"❌ Sensör okuyucu hatası: {e}")
@@ -422,3 +463,40 @@ class BahceRobotu:
             "acil_durum": self.acil_durum_aktif,
             "zaman": datetime.now().isoformat()
         }
+
+    def _log_smart_config_info(self):
+        """Akıllı config bilgilerini logla"""
+        runtime_info = self.config.get("runtime", {})
+
+        # Temel bilgileri logla
+        self.logger.info("=" * 50)
+        self.logger.info("🧠 AKILLI KONFİGÜRASYON BİLGİLERİ")
+        self.logger.info("=" * 50)
+
+        # Ortam bilgisi
+        env_type = runtime_info.get("environment_type", "unknown")
+        is_sim = runtime_info.get("is_simulation", False)
+        is_hardware = runtime_info.get("is_hardware", False)
+
+        self.logger.info(f"🌍 Ortam: {env_type}")
+        self.logger.info(f"🎮 Simülasyon: {'✅ Aktif' if is_sim else '❌ Pasif'}")
+        self.logger.info(f"⚙️ Donanım: {'✅ Aktif' if is_hardware else '❌ Pasif'}")
+
+        # Donanım yetenekleri
+        capabilities = runtime_info.get("capabilities", {})
+        if capabilities:
+            self.logger.info("🔧 Donanım Yetenekleri:")
+            for cap_name, available in capabilities.items():
+                status = "✅" if available else "❌"
+                self.logger.info(f"   {status} {cap_name.upper()}")
+
+        # Config dosya bilgileri
+        motor_type = self.config.get("motors", {}).get("type", "unknown")
+        mock_sensors = self.config.get("sensors", {}).get("mock_enabled", False)
+        web_port = self.config.get("web_interface", {}).get("port", 0)
+
+        self.logger.info(f"🚗 Motor Tipi: {motor_type}")
+        self.logger.info(f"📡 Sahte Sensörler: {'✅ Aktif' if mock_sensors else '❌ Pasif'}")
+        self.logger.info(f"🌐 Web Port: {web_port}")
+
+        self.logger.info("=" * 50)

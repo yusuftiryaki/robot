@@ -74,8 +74,9 @@ class SensorOkuyucu:
     Simülasyon modunda sahte veriler üretir.
     """
 
-    def __init__(self, sensor_config: Dict[str, Any]):
+    def __init__(self, sensor_config: Dict[str, Any], smart_config: Optional[Dict[str, Any]] = None):
         self.config = sensor_config
+        self.smart_config = smart_config
         self.logger = logging.getLogger("SensorOkuyucu")
 
         # Simülasyon modu kontrolü
@@ -86,13 +87,13 @@ class SensorOkuyucu:
         self.son_okuma_zamani = {}
 
         # Kalibrasyon verileri
-        self.imu_kalibrasyon = {
-            "accel_offset": {"x": 0, "y": 0, "z": 0},
-            "gyro_offset": {"x": 0, "y": 0, "z": 0}
+        self.imu_kalibrasyon: Dict[str, Dict[str, float]] = {
+            "accel_offset": {"x": 0.0, "y": 0.0, "z": 0.0},
+            "gyro_offset": {"x": 0.0, "y": 0.0, "z": 0.0}
         }
 
-        # Simülasyon verileri
-        self.simulation_data = self._load_simulation_data()
+        # Simülasyon verileri - Config'ten yükle
+        self.simulation_data = self._load_config_simulation_data()
         self.simulation_time_start = time.time()
 
         self.logger.info(f"📡 Sensör okuyucu başlatıldı (Simülasyon: {self.simulation_mode})")
@@ -123,6 +124,64 @@ class SensorOkuyucu:
                 "imu_orientation": {"roll": 0, "pitch": 0, "yaw": 0}
             }
 
+    def _load_config_simulation_data(self) -> Dict[str, Any]:
+        """Config'ten simülasyon verilerini yükle"""
+        # Öncelikle akıllı config'ten al
+        if hasattr(self, 'smart_config') and self.smart_config:
+            sensors_config = self.smart_config.get('sensors', {})
+            simulation_sensors = sensors_config.get('simulation_sensors', [])
+
+            # Simülasyon sensörlerini parse et
+            parsed_data = {}
+
+            for sensor in simulation_sensors:
+                sensor_type = sensor.get('type', '')
+                sensor_name = sensor.get('name', '')
+
+                if sensor_type == 'ultrasonic':
+                    # Ultrasonik sensör config'ini al
+                    parsed_data[f'ultrasonic_{sensor_name}'] = {
+                        'min_range': sensor.get('min_range', 0.02),
+                        'max_range': sensor.get('max_range', 4.0),
+                        'field_of_view': sensor.get('field_of_view', 15)
+                    }
+                elif sensor_type == 'imu':
+                    # IMU sensör config'ini al
+                    parsed_data['imu_config'] = {
+                        'update_rate': sensor.get('update_rate', 100),
+                        'name': sensor_name
+                    }
+                elif sensor_type == 'battery':
+                    # Batarya sensör config'ini al
+                    parsed_data['battery_config'] = {
+                        'initial_level': sensor.get('initial_level', 85),
+                        'drain_rate': sensor.get('drain_rate', 0.1),
+                        'name': sensor_name
+                    }
+
+            # Varsayılan değerlerle birleştir
+            default_data = {
+                "battery_voltage": 12.5,
+                "battery_current": 1.2,
+                "gps_coordinates": {"lat": 39.9334, "lon": 32.8597},
+                "imu_orientation": {"roll": 0, "pitch": 0, "yaw": 0}
+            }
+
+            # Battery config'ten voltage hesapla
+            battery_config = parsed_data.get('battery_config', {})
+            if battery_config:
+                initial_level = battery_config.get('initial_level', 85)
+                default_data['battery_voltage'] = 12.6 * (initial_level / 100.0)
+
+            # Parsed data ile varsayılan değerleri birleştir
+            default_data.update(parsed_data)
+
+            self.logger.info(f"📊 Config'ten simülasyon verileri yüklendi: {len(parsed_data)} sensor config")
+            return default_data
+
+        # Fallback to old method
+        return self._load_simulation_data()
+
     def _init_sensors(self):
         """Sensörleri başlat"""
         if self.simulation_mode:
@@ -137,7 +196,7 @@ class SensorOkuyucu:
         self.logger.info("✅ Simülasyon sensörleri hazır!")
 
     def _init_real_sensors(self):
-        """Gerçek sensörleri başlat"""
+        """Gerçek sensörleri başlat - Config'ten ayarları kullan"""
         self.logger.info("🔧 Fiziksel sensörler başlatılıyor...")
         try:
             import adafruit_gps
@@ -147,33 +206,66 @@ class SensorOkuyucu:
             import busio
             import serial
 
-            # I2C Bus
+            # Config'ten sensör ayarlarını al
+            mpu_config = self.config.get("mpu6050", {})
+            ina_config = self.config.get("ina219", {})
+            gps_config = self.config.get("gps", {})
+            bumper_config = self.config.get("front_bumper", {})
+
+            # I2C Bus - config'ten pin'leri al
+            sda_pin = mpu_config.get("sda_pin", 2)
+            scl_pin = mpu_config.get("scl_pin", 3)
+
+            # Board pin'leri kullan (config değerleri bilgi amaçlı)
             i2c = busio.I2C(board.SCL, board.SDA)
+            self.logger.info(f"✅ I2C Bus başlatıldı (SDA:{sda_pin}, SCL:{scl_pin})")
 
-            # MPU-6050 IMU
-            self.mpu = adafruit_mpu6050.MPU6050(i2c)
-            self.logger.info("✅ MPU-6050 IMU başlatıldı")
+            # MPU-6050 IMU - config'ten adres al
+            mpu_address = mpu_config.get("i2c_address", 0x68)
+            self.sample_rate = mpu_config.get("sample_rate", 50)
 
-            # INA219 Güç sensörü
-            self.ina219 = adafruit_ina219.INA219(i2c)
-            self.logger.info("✅ INA219 güç sensörü başlatıldı")
+            self.mpu = adafruit_mpu6050.MPU6050(i2c, address=mpu_address)
+            self.logger.info(f"✅ MPU-6050 IMU başlatıldı (Adres: 0x{mpu_address:02X}, Rate: {self.sample_rate}Hz)")
 
-            # GPS UART
+            # INA219 Güç sensörü - config'ten adres al
+            ina_address = ina_config.get("i2c_address", 0x40)
+            self.ina219 = adafruit_ina219.INA219(i2c, addr=ina_address)
+            self.logger.info(f"✅ INA219 güç sensörü başlatıldı (Adres: 0x{ina_address:02X})")
+
+            # GPS UART - config'ten ayarları al
+            uart_tx = gps_config.get("uart_tx", 14)
+            uart_rx = gps_config.get("uart_rx", 15)
+            baud_rate = gps_config.get("baud_rate", 9600)
+
             uart = serial.Serial(
                 "/dev/ttyS0",  # Raspberry Pi UART
-                baudrate=9600,
+                baudrate=baud_rate,
                 timeout=10
             )
             self.gps = adafruit_gps.GPS(uart, debug=False)
             self.gps.send_command(b"PMTK314,0,1,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0")
             self.gps.send_command(b"PMTK220,1000")
-            self.logger.info("✅ GPS NEO-6M başlatıldı")
+            self.logger.info(f"✅ GPS NEO-6M başlatıldı (TX:{uart_tx}, RX:{uart_rx}, Baud:{baud_rate})")
 
-            # Ön tampon sensörü
+            # Ön tampon sensörü - config'ten pin al
             import RPi.GPIO as GPIO
-            self.tampon_pin = self.config.get("front_bumper", {}).get("pin", 16)
-            GPIO.setup(self.tampon_pin, GPIO.IN, pull_up_down=GPIO.PUD_UP)
-            self.logger.info(f"✅ Ön tampon sensörü başlatıldı (Pin {self.tampon_pin})")
+            self.tampon_pin = bumper_config.get("pin", 16)
+            pull_up = bumper_config.get("pull_up", True)
+
+            if pull_up:
+                GPIO.setup(self.tampon_pin, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+            else:
+                GPIO.setup(self.tampon_pin, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
+
+            self.logger.info(f"✅ Ön tampon sensörü başlatıldı (Pin:{self.tampon_pin}, Pull-up:{pull_up})")
+
+            # Kamera config'ini kontrol et
+            camera_config = self.config.get("camera", {})
+            if camera_config:
+                camera_port = camera_config.get("port", 0)
+                camera_res = camera_config.get("resolution", [640, 480])
+                camera_fps = camera_config.get("framerate", 30)
+                self.logger.info(f"📷 Kamera config: Port {camera_port}, {camera_res[0]}x{camera_res[1]}, {camera_fps}fps")
 
             self.sensors_aktif = True
             self.logger.info("✅ Tüm fiziksel sensörler hazır!")
@@ -234,24 +326,31 @@ class SensorOkuyucu:
             return None
 
     async def _simulation_imu_oku(self) -> Dict[str, Any]:
-        """Simülasyon IMU verisi"""
+        """Simülasyon IMU verisi - Config'ten alınan değerlerle"""
         # Zamanla biraz salınım ekle
         t = time.time() - self.simulation_time_start
+
+        # Config'ten IMU ayarlarını al
+        imu_config = self.simulation_data.get("imu_config", {})
+        update_rate = imu_config.get('update_rate', 100)  # Hz
+
+        # Update rate'e göre salınım frekansını ayarla
+        freq_multiplier = update_rate / 100.0  # 100Hz'e göre normalize et
 
         # Simülasyon değerleri
         base_data = self.simulation_data.get("imu_orientation", {})
 
         imu_data = IMUData(
-            accel_x=0.1 * math.sin(t * 0.5),
-            accel_y=0.1 * math.cos(t * 0.3),
-            accel_z=9.81 + 0.05 * math.sin(t),
-            gyro_x=0.02 * math.sin(t * 0.8),
-            gyro_y=0.02 * math.cos(t * 0.6),
-            gyro_z=0.01 * math.sin(t * 0.4),
-            roll=base_data.get("roll", 0) + 2 * math.sin(t * 0.2),
-            pitch=base_data.get("pitch", 0) + 1 * math.cos(t * 0.3),
+            accel_x=0.1 * math.sin(t * 0.5 * freq_multiplier),
+            accel_y=0.1 * math.cos(t * 0.3 * freq_multiplier),
+            accel_z=9.81 + 0.05 * math.sin(t * freq_multiplier),
+            gyro_x=0.02 * math.sin(t * 0.8 * freq_multiplier),
+            gyro_y=0.02 * math.cos(t * 0.6 * freq_multiplier),
+            gyro_z=0.01 * math.sin(t * 0.4 * freq_multiplier),
+            roll=base_data.get("roll", 0) + 2 * math.sin(t * 0.2 * freq_multiplier),
+            pitch=base_data.get("pitch", 0) + 1 * math.cos(t * 0.3 * freq_multiplier),
             yaw=base_data.get("yaw", 0) + 0.5 * t % 360,
-            temperature=25.0 + 2 * math.sin(t * 0.1)
+            temperature=25.0 + 2 * math.sin(t * 0.1 * freq_multiplier)
         )
 
         return asdict(imu_data)
@@ -366,25 +465,30 @@ class SensorOkuyucu:
             return None
 
     async def _simulation_batarya_oku(self) -> Dict[str, Any]:
-        """Simülasyon batarya verisi"""
+        """Simülasyon batarya verisi - Config'ten alınan değerlerle"""
         t = time.time() - self.simulation_time_start
 
+        # Config'ten batarya ayarlarını al
+        battery_config = self.simulation_data.get('battery_config', {})
+        initial_level = battery_config.get('initial_level', 85)
+        drain_rate = battery_config.get('drain_rate', 0.1)  # %/hour
+
         # Batarya yavaş yavaş azalır
-        base_voltage = self.simulation_data.get("battery_voltage", 12.5)
         base_current = self.simulation_data.get("battery_current", 1.2)
 
-        # Batarya seviyesi zamanla azalır
-        discharge_rate = 0.001  # %0.1 per dakika
-        level = max(20.0, 100.0 - (t / 60) * discharge_rate)
+        # Batarya seviyesi zamanla azalır (drain_rate kullanılıyor)
+        hours_passed = t / 3600  # saniye -> saat
+        current_level = max(20.0, initial_level - (hours_passed * drain_rate))
 
-        voltage = base_voltage * (level / 100) + 0.1 * math.sin(t * 0.2)
+        # Voltage seviyeye göre hesapla
+        voltage = 12.6 * (current_level / 100) + 0.1 * math.sin(t * 0.2)
         current = base_current + 0.3 * math.sin(t * 0.5)
 
         power_data = PowerData(
             voltage=voltage,
             current=current,
             power=voltage * current,
-            level=level
+            level=current_level
         )
 
         return asdict(power_data)
@@ -439,24 +543,135 @@ class SensorOkuyucu:
             return None
 
     async def _simulation_ultrasonik_oku(self) -> Dict[str, Any]:
-        """Simülasyon ultrasonik verisi"""
+        """Simülasyon ultrasonik verisi - Config'den alınan değerlerle"""
         t = time.time() - self.simulation_time_start
 
-        # Rastgele engel mesafeleri
+        # Config'ten sensör ayarlarını al
+        front_config = self.simulation_data.get('ultrasonic_front', {})
+        left_config = self.simulation_data.get('ultrasonic_left', {})
+        right_config = self.simulation_data.get('ultrasonic_right', {})
+
+        # Varsayılan değerler
+        default_min = 0.02
+        default_max = 4.0
+
+        # Her sensör için dinamik mesafe hesapla
+        front_min = front_config.get('min_range', default_min)
+        front_max = front_config.get('max_range', default_max)
+        front_distance = front_min + (front_max - front_min) * (0.5 + 0.3 * math.sin(t * 0.3))
+
+        left_min = left_config.get('min_range', default_min)
+        left_max = left_config.get('max_range', default_max)
+        left_distance = left_min + (left_max - left_min) * (0.4 + 0.2 * math.cos(t * 0.4))
+
+        right_min = right_config.get('min_range', default_min)
+        right_max = right_config.get('max_range', default_max)
+        right_distance = right_min + (right_max - right_min) * (0.45 + 0.25 * math.sin(t * 0.2))
+
+        # Simülasyonda back sensörü yok config'de, varsayılan değerler kullan
+        back_distance = 3.0 + 0.2 * math.cos(t * 0.1)
+
         ultrasonik_data = UltrasonikData(
-            front=2.0 + 0.5 * math.sin(t * 0.3),
-            left=1.5 + 0.3 * math.cos(t * 0.4),
-            right=1.8 + 0.4 * math.sin(t * 0.2),
-            back=3.0 + 0.2 * math.cos(t * 0.1)
+            front=front_distance,
+            left=left_distance,
+            right=right_distance,
+            back=back_distance
         )
 
         return asdict(ultrasonik_data)
 
     async def _real_ultrasonik_oku(self) -> Dict[str, Any]:
-        """Gerçek ultrasonik verisi"""
-        # Bu fonksiyon ultrasonik sensör bağlandığında tamamlanacak
-        # Şimdilik simülasyon verisi dön
-        return await self._simulation_ultrasonik_oku()
+        """Gerçek ultrasonik verisi - Config'ten pin'leri al"""
+        try:
+            # Config'ten ultrasonik sensör ayarlarını al
+            distances = {}
+
+            # Config'ten ultrasonik sensör pin'lerini al
+            ultrasonic_sensors = self.config.get("ultrasonic_sensors", {})
+
+            # Varsayılan HC-SR04 sensör pin konfigürasyonu
+            default_pins = {
+                'front': {'trigger': 23, 'echo': 24},
+                'left': {'trigger': 25, 'echo': 8},
+                'right': {'trigger': 7, 'echo': 1},
+                'back': {'trigger': 12, 'echo': 16}
+            }
+
+            # Config'ten pin'leri al, yoksa varsayılan değerleri kullan
+            ultrasonic_config = {}
+            for position, default_config in default_pins.items():
+                sensor_config = ultrasonic_sensors.get(position, {})
+                ultrasonic_config[position] = {
+                    'trigger': sensor_config.get('trigger_pin', default_config['trigger']),
+                    'echo': sensor_config.get('echo_pin', default_config['echo'])
+                }
+
+            import RPi.GPIO as GPIO
+            import time
+
+            # Her sensör için mesafe ölç
+            for position, pins in ultrasonic_config.items():
+                try:
+                    trigger_pin = pins['trigger']
+                    echo_pin = pins['echo']
+
+                    # Pin'leri ayarla
+                    GPIO.setup(trigger_pin, GPIO.OUT)
+                    GPIO.setup(echo_pin, GPIO.IN)
+
+                    # Trigger sinyali gönder
+                    GPIO.output(trigger_pin, True)
+                    await asyncio.sleep(0.00001)  # 10 microsecond
+                    GPIO.output(trigger_pin, False)
+
+                    # Echo'yu bekle
+                    start_time = time.time()
+                    timeout = start_time + 0.1  # 100ms timeout
+
+                    # Echo yüksek olana kadar bekle
+                    while GPIO.input(echo_pin) == 0:
+                        start_time = time.time()
+                        if start_time > timeout:
+                            raise TimeoutError("Echo başlangıcı timeout")
+
+                    # Echo alçak olana kadar bekle
+                    while GPIO.input(echo_pin) == 1:
+                        stop_time = time.time()
+                        if stop_time > timeout:
+                            raise TimeoutError("Echo bitişi timeout")
+
+                    # Mesafe hesapla (ses hızı: 343 m/s)
+                    time_elapsed = stop_time - start_time
+                    distance = (time_elapsed * 343) / 2  # Gidip gelme mesafesi
+
+                    # Mesafe sınırları (2cm - 400cm)
+                    if distance < 0.02:
+                        distance = 0.02
+                    elif distance > 4.0:
+                        distance = 4.0
+
+                    distances[position] = distance
+
+                    self.logger.debug(f"📏 {position} ultrasonik: {distance:.2f}m (Trigger:{trigger_pin}, Echo:{echo_pin})")
+
+                except Exception as e:
+                    self.logger.warning(f"⚠️ {position} ultrasonik sensör hatası: {e}")
+                    # Hata durumunda max mesafe kullan
+                    distances[position] = 4.0
+
+            ultrasonik_data = UltrasonikData(
+                front=distances.get('front', 4.0),
+                left=distances.get('left', 4.0),
+                right=distances.get('right', 4.0),
+                back=distances.get('back', 4.0)
+            )
+
+            return asdict(ultrasonik_data)
+
+        except Exception as e:
+            self.logger.error(f"❌ Ultrasonik okuma hatası: {e}")
+            # Hata durumunda simülasyon verisi dön
+            return await self._simulation_ultrasonik_oku()
 
     async def kalibrasyon_yap(self):
         """🎯 Sensör kalibrasyonu yap"""
@@ -523,5 +738,5 @@ class SensorOkuyucu:
             try:
                 import RPi.GPIO as GPIO
                 GPIO.cleanup()
-            except:
+            except Exception:
                 pass

@@ -2,7 +2,7 @@
 robot:
   name: "OBA_Bahce_Asistani"
   version: "1.0.0"
-  debug_mode: true
+  debug_mode: false
 
 # Hardware Pin Konfigürasyonları
 hardware:
@@ -105,6 +105,14 @@ safety:
 # Logging
 logging:
   level: "INFO"
-  file: "logs/robot.log"
-  max_size: "10MB"
-  backup_count: 5
+  console:
+    enabled: true
+    colored: true
+    format: "%(asctime)s | %(name)s | %(levelname)s | %(message)s"
+  file:
+    enabled: true
+    path: "logs"
+    filename: "robot.log"
+    max_size: "10MB"
+    backup_count: 5
+    rotation: "size"

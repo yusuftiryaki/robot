@@ -15,7 +15,7 @@ import threading
 import time
 from datetime import datetime
 from functools import wraps
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 # OpenCV import'u koşullu yap (dev container'da sorun çıkarmasın)
 try:
@@ -83,20 +83,9 @@ class WebArayuz:
         werkzeug_log = werkzeug_logging.getLogger('werkzeug')
         werkzeug_log.setLevel(werkzeug_logging.WARNING)  # Sadece WARNING ve üzeri
 
-        # Web durumu
-        self.yayin_aktif = False
-
-        # Threading için lock
-        self.veri_kilidi = threading.Lock()
-        self.son_robot_verisi = {}
-        self.calisma_durumu = True  # Arka plan thread kontrolü
-
         self._yollari_ayarla()
 
         self.logger.info("🌐 Web arayüzü başlatıldı")
-
-        # Arka plan görevlerini başlat
-        self.arkaplan_gorevlerini_baslat()
 
     def _yollari_ayarla(self):
         """HTTP route'ları ayarla"""
@@ -255,41 +244,6 @@ class WebArayuz:
                     'error': str(e)
                 }), 500
 
-    def arkaplan_gorevlerini_baslat(self):
-        """Arka plan görevlerini başlat"""
-        def robot_verisini_guncelle():
-            """Robot verisini periyodik olarak güncelle"""
-            while self.calisma_durumu:
-                try:
-                    # Kapatılma kontrolü
-                    if not self.calisma_durumu:
-                        break
-
-                    # Robot'tan güncel veri al
-                    guncel_durum = self._guncel_robot_durumu_al()
-
-                    # Cache'i güncelle
-                    with self.veri_kilidi:
-                        self.son_robot_verisi = guncel_durum
-
-                    # Veri cache'de güncel tutuluyor
-                    # HTTP API'lerde kullanılacak
-
-                    time.sleep(2)  # 2 saniyede bir güncelle
-
-                except Exception as e:
-                    # Shutdown exception'ları atla
-                    if "shutdown" in str(e).lower() or "interpreter" in str(e).lower():
-                        self.logger.debug(f"Shutdown sırasında beklenen hata: {e}")
-                        break
-                    self.logger.error(f"❌ Arka plan güncelleme hatası: {e}")
-                    time.sleep(5)  # Hata durumunda 5 saniye bekle
-
-        # Arka plan thread'ini başlat
-        self.arkaplan_thread = threading.Thread(target=robot_verisini_guncelle, daemon=True)
-        self.arkaplan_thread.start()
-        self.logger.info("🔄 Arka plan veri güncelleme başlatıldı")
-
     def _komut_calistir(self, komut: str, parametreler: Dict[str, Any]) -> Any:
         """Robot komutunu çalıştır"""
         if komut == "start_mission":
@@ -332,12 +286,45 @@ class WebArayuz:
 
     def _hareket_komutu_gonder(self, dogrusal: float, acisal: float):
         """Robot'a hareket komutu gönder"""
-        # Bu fonksiyon robot'un motor kontrolcüsüne bağlanacak
         try:
-            if hasattr(self.robot, 'motor_kontrolcu'):
-                # Hareket komutunu async olarak çalıştır
-                # Gerçek implementasyon için asyncio bridge gerekli
-                pass
+            if hasattr(self.robot, 'motor_kontrolcu') and self.robot.motor_kontrolcu:
+                # HareketKomut objesi oluştur
+                from ..hardware.motor_kontrolcu import HareketKomut
+
+                hareket_komutu = HareketKomut(
+                    linear_hiz=dogrusal,
+                    angular_hiz=acisal,
+                    sure=0.1  # 100ms süre ile hareket
+                )
+
+                # Async komutunu thread pool'da çalıştır
+                import asyncio
+                import threading
+
+                def hareket_thread():
+                    try:
+                        # Yeni event loop oluştur
+                        loop = asyncio.new_event_loop()
+                        asyncio.set_event_loop(loop)
+
+                        # Hareket komutunu çalıştır
+                        loop.run_until_complete(
+                            self.robot.motor_kontrolcu.hareket_uygula(hareket_komutu)
+                        )
+
+                        loop.close()
+                    except Exception as e:
+                        self.logger.error(f"❌ Hareket thread hatası: {e}")
+
+                # Thread'i başlat
+                thread = threading.Thread(target=hareket_thread, daemon=True)
+                thread.start()
+
+                self.logger.debug(f"🎮 Hareket komutu gönderildi: linear={dogrusal:.2f}, angular={acisal:.2f}")
+
+            else:
+                self.logger.warning("⚠️ Motor kontrolcü bulunamadı")
+
         except Exception as e:
             self.logger.error(f"❌ Hareket komutu hatası: {e}")
 
@@ -382,10 +369,7 @@ class WebArayuz:
             # Sensor verilerini güvenli şekilde al
             sensor_verisi = {}
             try:
-                # Shutdown kontrolü
-                if not self.calisma_durumu:
-                    sensor_verisi = {}
-                else:
+                if hasattr(self.robot, 'sensor_verilerini_al'):
                     # Async methodları çalıştırmak için thread kullan
                     def sensor_verisi_al():
                         try:
@@ -407,6 +391,8 @@ class WebArayuz:
                     with concurrent.futures.ThreadPoolExecutor() as executor:
                         gelecek = executor.submit(sensor_verisi_al)
                         sensor_verisi = gelecek.result(timeout=2)  # 2 saniye timeout
+                else:
+                    sensor_verisi = {}
 
             except Exception as e:
                 # Shutdown exception'ları daha sessiz yakala
@@ -472,13 +458,20 @@ class WebArayuz:
 
         self.logger.info("✅ Web arayüzü kapatıldı")
 
-    def calistir(self, host: str = '0.0.0.0', port: int = 5000,
-                 debug: bool = False):
+    def calistir(self, host: Optional[str] = None, port: Optional[int] = None,
+                 debug: Optional[bool] = None):
         """Web sunucusunu başlat"""
-        self.logger.info(f"🌐 Web sunucusu başlatılıyor: http://{host}:{port}")
+        # Config'ten değerleri al, parametre verilmişse onu kullan
+        final_host = host or self.konfig.get('host', '0.0.0.0')
+        final_port = port or self.konfig.get('port', 5000)
+        final_debug = debug if debug is not None else self.konfig.get('debug', False)
+
+        self.logger.info(f"🌐 Web sunucusu başlatılıyor: http://{final_host}:{final_port}")
+        if final_debug:
+            self.logger.info("🔧 Debug modu aktif")
 
         # Flask app'i çalıştır
-        self.app.run(host=host, port=port, debug=debug, threaded=True)
+        self.app.run(host=final_host, port=final_port, debug=final_debug, threaded=True)
 
 
 # Web arayüzü için yardımcı fonksiyonlar

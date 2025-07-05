@@ -24,19 +24,19 @@ echo -e "${GREEN}🤖 Hacı Abi'nin OBA Robot'u Başlatılıyor...${NC}"
 echo "=================================================="
 
 # Parametreler
-SIMULATION_MODE=false
 DEBUG_MODE=false
+WEB_ONLY_MODE=false
 HELP_MODE=false
 
 # Parametre parsing
 while [[ $# -gt 0 ]]; do
     case $1 in
-        --sim|--simulation)
-            SIMULATION_MODE=true
-            shift
-            ;;
         --debug|-d)
             DEBUG_MODE=true
+            shift
+            ;;
+        --web-only|-w)
+            WEB_ONLY_MODE=true
             shift
             ;;
         --help|-h)
@@ -45,6 +45,7 @@ while [[ $# -gt 0 ]]; do
             ;;
         *)
             echo -e "${YELLOW}⚠️ Bilinmeyen parametre: $1${NC}"
+            echo -e "${YELLOW}   Yardım için: oba-start --help${NC}"
             shift
             ;;
     esac
@@ -56,15 +57,19 @@ if [ "$HELP_MODE" = true ]; then
     echo "  oba-start [seçenekler]"
     echo ""
     echo "Seçenekler:"
-    echo "  --sim, --simulation    Simülasyon modunda başlat"
     echo "  --debug, -d           Debug modunda başlat"
+    echo "  --web-only, -w        Sadece web arayüzü başlat"
     echo "  --help, -h            Bu yardım mesajını göster"
     echo ""
+    echo "🧠 Akıllı Özellikler:"
+    echo "  • Ortam otomatik tespit edilir (dev/production)"
+    echo "  • Simülasyon/donanım modu otomatik seçilir"
+    echo "  • Donanım yetenekleri otomatik kontrol edilir"
+    echo ""
     echo "Örnekler:"
-    echo "  oba-start              Normal mod"
-    echo "  oba-start --sim        Simülasyon modu"
+    echo "  oba-start              Normal mod (akıllı tespit)"
     echo "  oba-start --debug      Debug modu"
-    echo "  oba-start --sim -d     Simülasyon + Debug"
+    echo "  oba-start --web-only   Sadece web arayüzü"
     exit 0
 fi
 
@@ -398,18 +403,19 @@ test_environment() {
 # Ana program başlat
 start_robot() {
     echo -e "${GREEN}🚀 OBA Robot başlatılıyor...${NC}"
+    echo -e "${CYAN}🧠 Akıllı ortam tespiti aktif${NC}"
 
     # Parametreleri hazırla
     ARGS=()
 
-    if [ "$SIMULATION_MODE" = true ]; then
-        ARGS+=("--simulation")
-        echo -e "${CYAN}🎮 Simülasyon modu aktif${NC}"
-    fi
-
     if [ "$DEBUG_MODE" = true ]; then
         ARGS+=("--debug")
         echo -e "${CYAN}🐛 Debug modu aktif${NC}"
+    fi
+
+    if [ "$WEB_ONLY_MODE" = true ]; then
+        ARGS+=("--web-only")
+        echo -e "${CYAN}🌐 Sadece web arayüzü modu aktif${NC}"
     fi
 
     echo -e "${BLUE}⚡ Başlatma parametreleri: ${ARGS[*]}${NC}"

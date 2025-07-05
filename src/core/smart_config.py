@@ -117,7 +117,7 @@ class SmartConfigManager:
                 "simulation": {"enabled": True},
                 "motors": {"type": "simulation"},
                 "sensors": {"mock_enabled": True},
-                "logging": {"level": "DEBUG"},
+                # "logging": {"level": "DEBUG"},  # Environment config'i override etme
                 "web_interface": {"debug": True}
             })
 

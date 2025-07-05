@@ -150,9 +150,19 @@ class KameraIslemci:
         self.config = camera_config
         self.logger = logging.getLogger("KameraIslemci")
 
-        # Kamera parametreleri
-        self.resolution = tuple(camera_config.get("resolution", [640, 480]))
-        self.framerate = camera_config.get("framerate", 30)
+        # Kamera parametreleri - Config'ten al
+        self.resolution = tuple((
+            camera_config.get("resolution", {}).get("width", 640),
+            camera_config.get("resolution", {}).get("height", 480)
+        ))
+        self.framerate = camera_config.get("fps", 30)
+        self.device_id = camera_config.get("device_id", 0)
+        self.auto_exposure = camera_config.get("auto_exposure", True)
+
+        # Simülasyon parametreleri
+        simulation_params = camera_config.get("simulation_params", {})
+        self.test_pattern = simulation_params.get("test_pattern", True)
+        self.noise_level = simulation_params.get("noise_level", 0.05)
 
         # Simülasyon modu
         self.simulation_mode = self._is_simulation()
@@ -183,6 +193,9 @@ class KameraIslemci:
 
         self.logger.info(
             f"📷 Kamera işlemci başlatıldı (Simülasyon: {self.simulation_mode})")
+        self.logger.info(f"📷 Çözünürlük: {self.resolution}, FPS: {self.framerate}")
+        if self.simulation_mode:
+            self.logger.info(f"📷 Simülasyon: Test pattern: {self.test_pattern}, Noise: {self.noise_level}")
         self._init_camera()
 
     def _is_simulation(self) -> bool:
@@ -201,12 +214,45 @@ class KameraIslemci:
             self._init_real_camera()
 
     def _init_simulation_camera(self):
-        """Simülasyon kamerası başlat"""
+        """Simülasyon kamerası başlat - Config'ten ayarları kullan"""
         self.logger.info("🔧 Simülasyon kamerası başlatılıyor...")
-        # Simülasyon için sahte görüntü oluştur
-        self.son_goruntu = np.zeros(
-            (self.resolution[1], self.resolution[0], 3), dtype=np.uint8)
+
+        # Config'ten simülasyon ayarlarını al
+        if self.test_pattern:
+            # Test paterni ile görüntü oluştur
+            self.son_goruntu = self._create_test_pattern()
+        else:
+            # Düz yeşil görüntü oluştur
+            self.son_goruntu = np.zeros(
+                (self.resolution[1], self.resolution[0], 3), dtype=np.uint8)
+            self.son_goruntu[:, :] = [0, 150, 0]  # Yeşil çimen rengi
+
+        # Noise ekle
+        if self.noise_level > 0:
+            self._add_noise_to_image()
+
         self.logger.info("✅ Simülasyon kamerası hazır!")
+
+    def _create_test_pattern(self) -> np.ndarray:
+        """Test paterni oluştur"""
+        img = np.zeros((self.resolution[1], self.resolution[0], 3), dtype=np.uint8)
+
+        # Satranç tahtası paterni
+        square_size = 50
+        for i in range(0, self.resolution[1], square_size):
+            for j in range(0, self.resolution[0], square_size):
+                if (i // square_size + j // square_size) % 2 == 0:
+                    img[i:i + square_size, j:j + square_size] = [255, 255, 255]  # Beyaz
+                else:
+                    img[i:i + square_size, j:j + square_size] = [0, 0, 0]  # Siyah
+
+        return img
+
+    def _add_noise_to_image(self):
+        """Görüntüye noise ekle"""
+        if self.son_goruntu is not None:
+            noise = np.random.normal(0, self.noise_level * 255, self.son_goruntu.shape)
+            self.son_goruntu = np.clip(self.son_goruntu + noise, 0, 255).astype(np.uint8)
 
     def _init_real_camera(self):
         """Gerçek kamerayı başlat"""
@@ -384,7 +430,7 @@ class KameraIslemci:
 
                 agac = Engel(
                     tip=EngelTipi.AGAC,
-                    konum=(x + w//2, y + h//2),
+                    konum=(x + w // 2, y + h // 2),
                     boyut=(w, h),
                     mesafe=mesafe,
                     guven_skoru=0.7
@@ -424,7 +470,7 @@ class KameraIslemci:
 
                         tas = Engel(
                             tip=EngelTipi.TAS,
-                            konum=(x + w//2, y + h//2),
+                            konum=(x + w // 2, y + h // 2),
                             boyut=(w, h),
                             mesafe=mesafe,
                             guven_skoru=circularity
@@ -463,7 +509,7 @@ class KameraIslemci:
 
                     engel = Engel(
                         tip=EngelTipi.BILINMEYEN,
-                        konum=(x + w//2, y + h//2),
+                        konum=(x + w // 2, y + h // 2),
                         boyut=(w, h),
                         mesafe=mesafe,
                         guven_skoru=0.5
@@ -543,7 +589,7 @@ class KameraIslemci:
                 alan = cv2.contourArea(contour)
                 if self.sarj_min_contour_area < alan < 1000:
                     x, y, w, h = cv2.boundingRect(contour)
-                    merkez = (x + w//2, y + h//2)
+                    merkez = (x + w // 2, y + h // 2)
                     ir_noktalar.append(merkez)
 
             # Şarj istasyonu pattern'i ara (2 yakın LED)
@@ -564,7 +610,7 @@ class KameraIslemci:
                         if 20 < mesafe < 100:
                             sarj_tespit = True
                             sarj_merkezi = (
-                                (p1[0] + p2[0])//2, (p1[1] + p2[1])//2)
+                                (p1[0] + p2[0]) // 2, (p1[1] + p2[1]) // 2)
 
                             # Mesafe tahmini (merkez pixel'den)
                             img_center_x = self.resolution[0] // 2
@@ -574,7 +620,7 @@ class KameraIslemci:
                                 int(mesafe), int(mesafe), "sarj")
 
                             # Yön hesaplama (radyan)
-                            sarj_yonu = np.arctan2(sarj_merkezi[1] - self.resolution[1]//2,
+                            sarj_yonu = np.arctan2(sarj_merkezi[1] - self.resolution[1] // 2,
                                                    sarj_merkezi[0] - img_center_x)
                             break
 

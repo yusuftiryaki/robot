@@ -83,13 +83,13 @@ web_interface:
 # 📊 LOGGING
 # =====================================
 logging:
-  level: "DEBUG"
+  level: "INFO"
   console:
     enabled: true
     colored: true
     format: "%(asctime)s | %(name)s | %(levelname)s | %(message)s"
   file:
-    enabled: true
+    enabled: false
     path: "/workspaces/oba/logs"
     filename: "robot_dev.log"
     max_size: "10MB"
@@ -115,21 +115,3 @@ paths:
   models: "/workspaces/oba/models"
   config: "/workspaces/oba/config"
   temp: "/workspaces/oba/temp"
-
-# =====================================
-# 🔄 UPDATE SETTINGS
-# =====================================
-updates:
-  check_interval: 300 # seconds
-  auto_restart: false
-  backup_config: true
-
-# =====================================
-# 🎯 DEVELOPMENT FEATURES
-# =====================================
-development:
-  hot_reload: true
-  profiling: true
-  memory_monitoring: true
-  performance_logging: true
-  test_mode: true

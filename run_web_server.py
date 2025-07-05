@@ -16,6 +16,7 @@ from datetime import datetime
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 
 from web.web_server import WebArayuz
+from core.smart_config import SmartConfigManager
 
 project_root = os.path.dirname(__file__)
 src_path = os.path.join(project_root, 'src')
@@ -110,14 +111,15 @@ def main():
     print("🌐 OBA Web Arayüzü Test Başlatılıyor...")
     print("=" * 50)
 
+    # Smart config'i başlat
+    config_manager = SmartConfigManager()
+    config = config_manager.load_config()
+
+    # Web config'i al
+    web_config = config.get('web', {})
+
     # Mock robot oluştur
     robot = MockRobot()
-
-    # Web konfigürasyonu
-    web_config = {
-        'secret_key': 'test_secret_key_2024',
-        'debug': True
-    }
 
     # Web arayüzü oluştur
     web_arayuz = WebArayuz(robot, web_config)
@@ -130,18 +132,22 @@ def main():
     )
     data_thread.start()
 
+    # Config'ten host ve port al
+    host = web_config.get('host', '0.0.0.0')
+    port = web_config.get('port', 5000)
+
     print("🎯 Web sunucusu başlatılıyor...")
     print("📱 Tarayıcınızda şu adresleri açın:")
-    print("   • http://localhost:5000")
-    print("   • http://0.0.0.0:5000")
-    print("   • http://127.0.0.1:5000")
+    print(f"   • http://localhost:{port}")
+    print(f"   • http://{host}:{port}")
+    print(f"   • http://127.0.0.1:{port}")
     print()
     print("⚠️  Durdurmak için Ctrl+C")
     print("=" * 50)
 
     try:
-        # Web sunucusunu başlat
-        web_arayuz.run(host='0.0.0.0', port=5000, debug=True)
+        # Web sunucusunu başlat - config'ten parametreleri al
+        web_arayuz.calistir()  # Config'ten otomatik alacak
     except KeyboardInterrupt:
         print("\n🛑 Web sunucusu durduruldu!")
     except Exception as e:
