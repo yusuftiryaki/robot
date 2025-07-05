@@ -62,11 +62,13 @@ for arg in "$@"; do
             echo ""
             echo "Seçenekler:"
             echo "  force, -f         Onay istemeden temizle"
+            echo "                    (Force modunda büyük loglar tamamen boşaltılır)"
             echo "  help              Bu yardımı göster"
             echo ""
             echo "Örnekler:"
             echo "  oba-clean                 Geçici dosyaları temizle"
-            echo "  oba-clean logs            Eski logları temizle"
+            echo "  oba-clean logs            Eski logları temizle (büyük loglar kısaltılır)"
+            echo "  oba-clean logs force      robot.log'u tamamen boşalt (boyut fark etmez)"
             echo "  oba-clean all force       Tümünü zorla temizle"
             exit 0
             ;;
@@ -241,6 +243,12 @@ clean_log_files() {
     # Büyük log dosyaları (>10MB)
     local large_logs=$(find logs -name "*.log" -type f -size +10M 2>/dev/null | wc -l)
 
+    # robot.log dosyası var mı kontrol et (force modunda boyut fark etmez)
+    local robot_log_exists=0
+    if [[ -f "logs/robot.log" ]]; then
+        robot_log_exists=1
+    fi
+
     # Rotated log dosyaları (.1, .2, etc.)
     local rotated_logs=$(find logs -name "*.log.*" -type f 2>/dev/null | wc -l)
     local rotated_log_size=0
@@ -254,25 +262,40 @@ clean_log_files() {
     echo "   📅 7+ gün eski loglar: $old_logs dosya ($(format_size $old_log_size))"
     echo "   📈 Büyük loglar (>10MB): $large_logs dosya"
     echo "   🔄 Rotated loglar: $rotated_logs dosya ($(format_size $rotated_log_size))"
+    if [[ $robot_log_exists -eq 1 ]]; then
+        local robot_log_size=$(stat -f%z "logs/robot.log" 2>/dev/null || stat -c%s "logs/robot.log" 2>/dev/null || echo 0)
+        echo "   🤖 robot.log: $(format_size $robot_log_size)"
+    fi
 
     local total_clean_files=$((old_logs + rotated_logs))
     local total_clean_size=$((old_log_size + rotated_log_size))
 
+    if [[ $total_clean_files -eq 0 ]] && [[ $large_logs -eq 0 ]] && [[ $robot_log_exists -eq 0 ]]; then
+        echo -e "${GREEN}✅ Temizlenecek log dosyası bulunamadı${NC}"
+        return 0
+    fi
+
+    # Büyük dosyalar için uyarı
+    if [[ $large_logs -gt 0 ]]; then
+        echo -e "${YELLOW}💡 $large_logs büyük log dosyası mevcut${NC}"
+        total_clean_files=$((total_clean_files + large_logs))
+    fi
+
+    # Force modunda robot.log varsa temizleme listesine ekle
+    if $FORCE && [[ $robot_log_exists -eq 1 ]]; then
+        echo -e "${YELLOW}💡 Force modunda robot.log temizlenecek${NC}"
+        total_clean_files=$((total_clean_files + 1))
+    fi
+
     if [[ $total_clean_files -eq 0 ]]; then
         echo -e "${GREEN}✅ Temizlenecek log dosyası bulunamadı${NC}"
-
-        # Büyük dosyalar için uyarı
-        if [[ $large_logs -gt 0 ]]; then
-            echo -e "${YELLOW}💡 $large_logs büyük log dosyası mevcut, manuel kontrol edilebilir${NC}"
-        fi
-
         return 0
     fi
 
     echo ""
-    echo -e "${YELLOW}📊 Temizlenecek: $total_clean_files dosya ($(format_size $total_clean_size))${NC}"
+    echo -e "${YELLOW}📊 Temizlenecek: $total_clean_files dosya/öğe ($(format_size $total_clean_size))${NC}"
 
-    if confirm_action "Bu log dosyalarını silmek istediğinizden emin misiniz?"; then
+    if confirm_action "Bu log dosyalarını temizlemek/kısaltmak istediğinizden emin misiniz?"; then
         echo ""
         echo "🧹 Log temizliği başlıyor..."
 
@@ -288,13 +311,23 @@ clean_log_files() {
             echo -e "${GREEN}✅ Rotated log dosyaları temizlendi${NC}"
         fi
 
-        # Büyük log dosyalarını truncate et
+        # Büyük log dosyalarını işle
         if [[ $large_logs -gt 0 ]]; then
-            echo -n "Büyük log dosyalarını kısaltmak ister misiniz? (y/N): "
-            if $FORCE || { read -r response && [[ "$response" =~ ^[Yy]$ ]]; }; then
+            if $FORCE; then
+                # Force modunda tamamen boşalt
+                find logs -name "*.log" -type f -size +10M -exec truncate -s 0 {} \; 2>/dev/null || true
+                echo -e "${GREEN}✅ Büyük log dosyaları tamamen boşaltıldı${NC}"
+            elif confirm_action "Büyük log dosyalarını kısaltmak ister misiniz?"; then
+                # Manual modunda sadece kısalt
                 find logs -name "*.log" -type f -size +10M -exec truncate -s 1M {} \; 2>/dev/null || true
                 echo -e "${GREEN}✅ Büyük log dosyaları kısaltıldı${NC}"
             fi
+        fi
+
+        # Force modunda robot.log'u boyutuna bakmadan temizle
+        if $FORCE && [[ $robot_log_exists -eq 1 ]]; then
+            truncate -s 0 "logs/robot.log" 2>/dev/null || true
+            echo -e "${GREEN}✅ robot.log dosyası tamamen boşaltıldı${NC}"
         fi
 
         echo -e "${GREEN}🎉 Log temizliği tamamlandı!${NC}"

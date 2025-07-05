@@ -234,6 +234,10 @@ class BahceRobotu:
             }
         return await self.sensor_okuyucu.tum_verileri_oku()
 
+    async def sensor_verilerini_al(self) -> Dict[str, Any]:
+        """Tüm sensörlerden veri al (public interface)"""
+        return await self._sensor_verilerini_oku()
+
     async def _durum_makinesini_isle(self, sensor_data: Dict[str, Any]):
         """
         🧠 Durum Makinesinin Beyni
@@ -306,8 +310,13 @@ class BahceRobotu:
         # AI karar verme
         karar = await self.karar_verici.next_action_belirle(sensor_data, kamera_data)
 
-        # Motor hareketini uygula
-        await self.motor_kontrolcu.hareket_uygula(karar["hareket"])
+        # Motor hareketini uygula - Dict'i HareketKomut'a çevir
+        from hardware.motor_kontrolcu import HareketKomut
+        hareket_komut = HareketKomut(
+            linear_hiz=karar.hareket.get("linear", 0.0),
+            angular_hiz=karar.hareket.get("angular", 0.0)
+        )
+        await self.motor_kontrolcu.hareket_uygula(hareket_komut)
 
         # Fırçaları çalıştır
         await self.motor_kontrolcu.fircalari_calistir(True)

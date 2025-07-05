@@ -5,7 +5,7 @@ Web sunucusu test scripti
 Hacı Abi'nin web arayüzünü test etmek için
 """
 
-from web.web_server import WebArayuz
+# Proje klasörünü Python path'ine ekle
 import os
 import sys
 import threading
@@ -13,6 +13,10 @@ import time
 from datetime import datetime
 
 # Proje klasörünü Python path'ine ekle
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
+
+from web.web_server import WebArayuz
+
 project_root = os.path.dirname(__file__)
 src_path = os.path.join(project_root, 'src')
 sys.path.insert(0, src_path)

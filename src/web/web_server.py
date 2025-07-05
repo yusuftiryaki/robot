@@ -14,6 +14,7 @@ import logging
 import threading
 import time
 from datetime import datetime
+from functools import wraps
 from typing import Any, Dict
 
 # OpenCV import'u koşullu yap (dev container'da sorun çıkarmasın)
@@ -25,19 +26,47 @@ except ImportError:
     print("⚠️ OpenCV kullanılamıyor - video stream devre dışı")
 
 from flask import Flask, Response, jsonify, render_template, request
-from flask_socketio import SocketIO, emit
+
+
+def istek_logla(f):
+    """API isteklerini loglayan decorator"""
+    @wraps(f)
+    def dekore_edilmis_fonksiyon(*args, **kwargs):
+        try:
+            # İstek bilgilerini al
+            metot = request.method
+            yol = request.path
+            uzak_adres = request.remote_addr
+
+            # Log'a kaydet
+            logger = logging.getLogger("WebArayuz")
+            logger.info(f"🌐 API İsteği: {metot} {yol} - IP: {uzak_adres}")
+
+            # Fonksiyonu çalıştır
+            sonuc = f(*args, **kwargs)
+
+            # Başarı logu
+            logger.info(f"✅ API Yanıtı: {yol} - Başarılı")
+
+            return sonuc
+        except Exception as e:
+            # Hata logu
+            logger = logging.getLogger("WebArayuz")
+            logger.error(f"❌ API Hatası: {yol} - {str(e)}")
+            raise
+    return dekore_edilmis_fonksiyon
 
 
 class WebArayuz:
     """
     🌐 Ana Web Arayüzü Sınıfı
 
-    Flask ve SocketIO ile real-time robot kontrolü sağlar.
+    Flask ile HTTP API tabanlı robot kontrolü sağlar.
     """
 
-    def __init__(self, robot_instance, web_config: Dict[str, Any]):
-        self.robot = robot_instance
-        self.config = web_config
+    def __init__(self, robot_ornegi, web_konfig: Dict[str, Any]):
+        self.robot = robot_ornegi
+        self.konfig = web_konfig
         self.logger = logging.getLogger("WebArayuz")
 
         # Flask app kurulumu
@@ -46,26 +75,30 @@ class WebArayuz:
             template_folder='/workspaces/oba/src/web/templates',
             static_folder='/workspaces/oba/src/web/static'
         )
-        secret_key = web_config.get('secret_key', 'haci_abi_secret_2024')
-        self.app.config['SECRET_KEY'] = secret_key
+        gizli_anahtar = web_konfig.get('secret_key', 'haci_abi_secret_2024')
+        self.app.config['SECRET_KEY'] = gizli_anahtar
 
-        # SocketIO kurulumu
-        self.socketio = SocketIO(self.app, cors_allowed_origins="*")
+        # Werkzeug (Flask) HTTP loglarını sessizleştir
+        import logging as werkzeug_logging
+        werkzeug_log = werkzeug_logging.getLogger('werkzeug')
+        werkzeug_log.setLevel(werkzeug_logging.WARNING)  # Sadece WARNING ve üzeri
 
         # Web durumu
-        self.connected_clients = 0
-        self.streaming_active = False
+        self.yayin_aktif = False
 
         # Threading için lock
-        self.data_lock = threading.Lock()
-        self.latest_robot_data = {}
+        self.veri_kilidi = threading.Lock()
+        self.son_robot_verisi = {}
+        self.calisma_durumu = True  # Arka plan thread kontrolü
 
-        self._setup_routes()
-        self._setup_socketio_events()
+        self._yollari_ayarla()
 
         self.logger.info("🌐 Web arayüzü başlatıldı")
 
-    def _setup_routes(self):
+        # Arka plan görevlerini başlat
+        self.arkaplan_gorevlerini_baslat()
+
+    def _yollari_ayarla(self):
         """HTTP route'ları ayarla"""
 
         @self.app.route('/')
@@ -74,37 +107,39 @@ class WebArayuz:
             return render_template('index.html')
 
         @self.app.route('/api/robot/status')
-        def robot_status():
+        def robot_durumu():
             """Robot durumu API"""
             try:
-                with self.data_lock:
-                    status = self.latest_robot_data.copy()
+                # Robot'tan güncel status bilgisi al
+                durum_verisi = self._guncel_robot_durumu_al()
 
                 return jsonify({
                     "success": True,
-                    "data": status,
+                    "data": durum_verisi,
                     "timestamp": datetime.now().isoformat()
                 })
             except Exception as e:
+                self.logger.error(f"❌ Robot status alma hatası: {e}")
                 return jsonify({
                     "success": False,
                     "error": str(e)
                 }), 500
 
         @self.app.route('/api/robot/command', methods=['POST'])
-        def robot_command():
+        @istek_logla
+        def robot_komut():
             """Robot komut API"""
             try:
-                data = request.get_json()
-                command = data.get('command')
-                params = data.get('params', {})
+                veri = request.get_json()
+                komut = veri.get('command')
+                parametreler = veri.get('params', {})
 
-                result = self._execute_command(command, params)
+                sonuc = self._komut_calistir(komut, parametreler)
 
                 return jsonify({
                     "success": True,
-                    "result": result,
-                    "command": command
+                    "result": sonuc,
+                    "command": komut
                 })
             except Exception as e:
                 return jsonify({
@@ -113,17 +148,17 @@ class WebArayuz:
                 }), 500
 
         @self.app.route('/api/robot/logs')
-        def get_logs():
+        def loglari_al():
             """Robot logları API"""
             try:
                 # Son 100 log satırını oku
-                with open('logs/robot.log', 'r') as f:
-                    lines = f.readlines()
-                    recent_logs = lines[-100:] if len(lines) > 100 else lines
+                with open('logs/robot.log', 'r', encoding='utf-8') as f:
+                    satirlar = f.readlines()
+                    son_loglar = satirlar[-100:] if len(satirlar) > 100 else satirlar
 
                 return jsonify({
                     "success": True,
-                    "logs": [line.strip() for line in recent_logs]
+                    "logs": [satir.strip() for satir in son_loglar]
                 })
             except Exception as e:
                 return jsonify({
@@ -132,135 +167,170 @@ class WebArayuz:
                 }), 500
 
         @self.app.route('/video_feed')
-        def video_feed():
+        def video_akisi():
             """Video stream endpoint"""
             return Response(
-                self._generate_video_stream(),
+                self._video_akisi_uret(),
                 mimetype='multipart/x-mixed-replace; boundary=frame'
             )
 
-    def _setup_socketio_events(self):
-        """SocketIO event'larını ayarla"""
-
-        @self.socketio.on('connect')
-        def handle_connect():
-            self.connected_clients += 1
-            client_count = self.connected_clients
-            message = f"📱 Yeni client bağlandı. Toplam: {client_count}"
-            self.logger.info(message)
-            emit('connected', {'message': 'Robot kontrolüne bağlandınız!'})
-
-        @self.socketio.on('disconnect')
-        def handle_disconnect():
-            self.connected_clients -= 1
-            client_count = self.connected_clients
-            message = f"📱 Client bağlantısı kesildi. Toplam: {client_count}"
-            self.logger.info(message)
-
-        @self.socketio.on('manual_control')
-        def handle_manual_control(data):
-            """Manuel kontrol komutları"""
+        @self.app.route('/api/robot/manual_control', methods=['POST'])
+        @istek_logla
+        def manuel_kontrol():
+            """Manuel kontrol API"""
             try:
-                linear = data.get('linear', 0.0)
-                angular = data.get('angular', 0.0)
+                veri = request.get_json()
+                dogrusal = veri.get('linear', 0.0)
+                acisal = veri.get('angular', 0.0)
 
                 # Robot'a hareket komutunu gönder
-                self._send_movement_command(linear, angular)
+                self._hareket_komutu_gonder(dogrusal, acisal)
 
-                emit('command_executed', {
+                return jsonify({
                     'success': True,
                     'command': 'manual_control',
-                    'params': {'linear': linear, 'angular': angular}
+                    'params': {'linear': dogrusal, 'angular': acisal}
                 })
             except Exception as e:
-                emit('command_executed', {
+                return jsonify({
                     'success': False,
                     'error': str(e)
-                })
+                }), 500
 
-        @self.socketio.on('start_mission')
-        def handle_start_mission(data):
-            """Görev başlatma"""
+        @self.app.route('/api/robot/start_mission', methods=['POST'])
+        @istek_logla
+        def gorev_baslat():
+            """Görev başlatma API"""
             try:
-                mission_type = data.get('type', 'mowing')
-                # params = data.get('params', {})  # Gelecekte kullanılacak
+                veri = request.get_json() or {}
+                gorev_tipi = veri.get('type', 'mowing')
 
                 if hasattr(self.robot, 'gorev_baslat'):
                     self.robot.gorev_baslat()
 
-                emit('mission_started', {
+                return jsonify({
                     'success': True,
-                    'mission_type': mission_type
+                    'mission_type': gorev_tipi,
+                    'message': 'Görev başlatıldı'
                 })
             except Exception as e:
-                emit('mission_started', {
+                return jsonify({
                     'success': False,
                     'error': str(e)
-                })
+                }), 500
 
-        @self.socketio.on('stop_mission')
-        def handle_stop_mission():
-            """Görev durdurma"""
+        @self.app.route('/api/robot/stop_mission', methods=['POST'])
+        @istek_logla
+        def gorev_durdur():
+            """Görev durdurma API"""
             try:
                 if hasattr(self.robot, 'gorev_durdur'):
                     self.robot.gorev_durdur()
 
-                emit('mission_stopped', {'success': True})
+                return jsonify({
+                    'success': True,
+                    'message': 'Görev durduruldu'
+                })
             except Exception as e:
-                emit('mission_stopped', {
+                return jsonify({
                     'success': False,
                     'error': str(e)
-                })
+                }), 500
 
-        @self.socketio.on('emergency_stop')
-        def handle_emergency_stop():
-            """Acil durdurma"""
+        @self.app.route('/api/robot/emergency_stop', methods=['POST'])
+        @istek_logla
+        def acil_durdur():
+            """Acil durdurma API"""
             try:
                 if hasattr(self.robot, 'acil_durdur'):
                     self.robot.acil_durdur()
 
-                emit('emergency_stopped', {'success': True})
-                self.socketio.emit('emergency_alert', {
+                return jsonify({
+                    'success': True,
                     'message': 'ACİL DURDURMA AKTİF!'
                 })
             except Exception as e:
-                emit('emergency_stopped', {
+                return jsonify({
                     'success': False,
                     'error': str(e)
-                })
+                }), 500
 
-    def _execute_command(self, command: str, params: Dict[str, Any]) -> Any:
+    def arkaplan_gorevlerini_baslat(self):
+        """Arka plan görevlerini başlat"""
+        def robot_verisini_guncelle():
+            """Robot verisini periyodik olarak güncelle"""
+            while self.calisma_durumu:
+                try:
+                    # Kapatılma kontrolü
+                    if not self.calisma_durumu:
+                        break
+
+                    # Robot'tan güncel veri al
+                    guncel_durum = self._guncel_robot_durumu_al()
+
+                    # Cache'i güncelle
+                    with self.veri_kilidi:
+                        self.son_robot_verisi = guncel_durum
+
+                    # Veri cache'de güncel tutuluyor
+                    # HTTP API'lerde kullanılacak
+
+                    time.sleep(2)  # 2 saniyede bir güncelle
+
+                except Exception as e:
+                    # Shutdown exception'ları atla
+                    if "shutdown" in str(e).lower() or "interpreter" in str(e).lower():
+                        self.logger.debug(f"Shutdown sırasında beklenen hata: {e}")
+                        break
+                    self.logger.error(f"❌ Arka plan güncelleme hatası: {e}")
+                    time.sleep(5)  # Hata durumunda 5 saniye bekle
+
+        # Arka plan thread'ini başlat
+        self.arkaplan_thread = threading.Thread(target=robot_verisini_guncelle, daemon=True)
+        self.arkaplan_thread.start()
+        self.logger.info("🔄 Arka plan veri güncelleme başlatıldı")
+
+    def _komut_calistir(self, komut: str, parametreler: Dict[str, Any]) -> Any:
         """Robot komutunu çalıştır"""
-        if command == "start_mission":
+        if komut == "start_mission":
             if hasattr(self.robot, 'gorev_baslat'):
                 self.robot.gorev_baslat()
                 return "Görev başlatıldı"
 
-        elif command == "stop_mission":
+        elif komut == "stop_mission":
             if hasattr(self.robot, 'gorev_durdur'):
                 self.robot.gorev_durdur()
                 return "Görev durduruldu"
 
-        elif command == "emergency_stop":
+        elif komut == "emergency_stop":
             if hasattr(self.robot, 'acil_durdur'):
                 self.robot.acil_durdur()
                 return "Acil durdurma aktif"
 
-        elif command == "manual_move":
-            linear = params.get('linear', 0.0)
-            angular = params.get('angular', 0.0)
-            self._send_movement_command(linear, angular)
-            return f"Hareket komutu: linear={linear}, angular={angular}"
+        elif komut == "manual_move":
+            dogrusal = parametreler.get('linear', 0.0)
+            acisal = parametreler.get('angular', 0.0)
+            self._hareket_komutu_gonder(dogrusal, acisal)
+            return f"Hareket komutu: linear={dogrusal}, angular={acisal}"
 
-        elif command == "set_brushes":
-            aktif = params.get('active', False)
+        elif komut == "set_brushes":
+            aktif = parametreler.get('active', False)
             # Robot'a fırça komutunu gönder
             return f"Fırçalar {'açıldı' if aktif else 'kapatıldı'}"
 
-        else:
-            raise ValueError(f"Bilinmeyen komut: {command}")
+        elif komut == "set_fan":
+            aktif = parametreler.get('active', False)
+            # Robot'a fan komutunu gönder
+            return f"Fan {'açıldı' if aktif else 'kapatıldı'}"
 
-    def _send_movement_command(self, linear: float, angular: float):
+        elif komut == "return_to_dock":
+            # Şarj istasyonuna dönme komutunu gönder
+            return "Şarj istasyonuna dönülüyor"
+
+        else:
+            raise ValueError(f"Bilinmeyen komut: {komut}")
+
+    def _hareket_komutu_gonder(self, dogrusal: float, acisal: float):
         """Robot'a hareket komutu gönder"""
         # Bu fonksiyon robot'un motor kontrolcüsüne bağlanacak
         try:
@@ -271,14 +341,14 @@ class WebArayuz:
         except Exception as e:
             self.logger.error(f"❌ Hareket komutu hatası: {e}")
 
-    def _generate_video_stream(self):
+    def _video_akisi_uret(self):
         """Video stream generator"""
         if not CV2_AVAILABLE:
             # OpenCV yoksa boş frame gönder
             while True:
-                message = b'--frame\r\nContent-Type: text/plain\r\n\r\n'
-                message += b'OpenCV not available\r\n'
-                yield message
+                mesaj = b'--frame\r\nContent-Type: text/plain\r\n\r\n'
+                mesaj += b'OpenCV not available\r\n'
+                yield mesaj
                 time.sleep(1)
             return
 
@@ -286,51 +356,139 @@ class WebArayuz:
             try:
                 if hasattr(self.robot, 'kamera_islemci'):
                     # Robot'tan görüntü al
-                    frame = asyncio.run(self.robot.kamera_islemci.goruntu_al())
+                    kare = asyncio.run(self.robot.kamera_islemci.goruntu_al())
 
-                    if frame is not None:
+                    if kare is not None:
                         # JPEG formatına çevir
-                        jpeg_params = [cv2.IMWRITE_JPEG_QUALITY, 80]
-                        ret, buffer = cv2.imencode('.jpg', frame, jpeg_params)
+                        jpeg_parametreleri = [cv2.IMWRITE_JPEG_QUALITY, 80]
+                        ret, buffer = cv2.imencode('.jpg', kare, jpeg_parametreleri)
                         if ret:
-                            frame_bytes = buffer.tobytes()
-                            content_type = b'Content-Type: image/jpeg\r\n\r\n'
-                            yield (b'--frame\r\n' + content_type +
-                                   frame_bytes + b'\r\n')
+                            kare_baytlari = buffer.tobytes()
+                            icerik_tipi = b'Content-Type: image/jpeg\r\n\r\n'
+                            yield (b'--frame\r\n' + icerik_tipi +
+                                   kare_baytlari + b'\r\n')
 
                 time.sleep(0.1)  # 10 FPS
             except Exception as e:
                 self.logger.error(f"❌ Video stream hatası: {e}")
                 time.sleep(1)
 
-    def robot_data_guncelle(self, robot_data: Dict[str, Any]):
-        """Robot verilerini güncelle ve client'lara gönder"""
+    def _guncel_robot_durumu_al(self) -> Dict[str, Any]:
+        """Robot'tan güncel status bilgisi al"""
         try:
-            with self.data_lock:
-                self.latest_robot_data = robot_data.copy()
+            # Robot durum bilgisi
+            robot_durumu = self.robot.get_durum_bilgisi()
 
-            # Bağlı client'lara real-time veri gönder
-            if self.connected_clients > 0:
-                self.socketio.emit('robot_data_update', robot_data)
+            # Sensor verilerini güvenli şekilde al
+            sensor_verisi = {}
+            try:
+                # Shutdown kontrolü
+                if not self.calisma_durumu:
+                    sensor_verisi = {}
+                else:
+                    # Async methodları çalıştırmak için thread kullan
+                    def sensor_verisi_al():
+                        try:
+                            dongu = asyncio.new_event_loop()
+                            asyncio.set_event_loop(dongu)
+                            try:
+                                return dongu.run_until_complete(self.robot.sensor_verilerini_al())
+                            finally:
+                                dongu.close()
+                        except Exception as e:
+                            # Shutdown exception'ları daha sessiz yakala
+                            if "shutdown" in str(e).lower() or "interpreter" in str(e).lower():
+                                return {}
+                            self.logger.warning(f"⚠️ Sensor verisi alınamadı: {e}")
+                            return {}
+
+                    # Thread'de çalıştır
+                    import concurrent.futures
+                    with concurrent.futures.ThreadPoolExecutor() as executor:
+                        gelecek = executor.submit(sensor_verisi_al)
+                        sensor_verisi = gelecek.result(timeout=2)  # 2 saniye timeout
+
+            except Exception as e:
+                # Shutdown exception'ları daha sessiz yakala
+                if "shutdown" in str(e).lower() or "interpreter" in str(e).lower():
+                    sensor_verisi = {}
+                else:
+                    self.logger.warning(f"⚠️ Sensor verisi alınamadı: {e}")
+                    sensor_verisi = {}
+
+            # Motor durumu
+            motor_durumu = {}
+            if hasattr(self.robot, 'motor_kontrolcu') and self.robot.motor_kontrolcu:
+                motor_durumu = self.robot.motor_kontrolcu.get_motor_durumu()
+
+            # Sensor okuyucu durumu
+            sensor_okuyucu_durumu = {}
+            if hasattr(self.robot, 'sensor_okuyucu') and self.robot.sensor_okuyucu:
+                sensor_okuyucu_durumu = self.robot.sensor_okuyucu.get_sensor_durumu()
+
+            # Konum bilgisi ve istatistikler
+            konum_bilgisi = {}
+            hareket_istatistikleri = {}
+            if hasattr(self.robot, 'konum_takipci') and self.robot.konum_takipci:
+                try:
+                    konum_bilgisi = self.robot.konum_takipci.get_mevcut_konum()
+                    hareket_istatistikleri = self.robot.konum_takipci.get_hareket_istatistikleri()
+                except Exception as e:
+                    self.logger.debug(f"Konum bilgisi alınamadı: {e}")
+
+            # Hepsini birleştir
+            tam_durum = {
+                "durum_bilgisi": robot_durumu,
+                "sensor_data": sensor_verisi,
+                "motor_durumu": motor_durumu,
+                "sensor_okuyucu_durumu": sensor_okuyucu_durumu,
+                "konum_bilgisi": konum_bilgisi,
+                "hareket_istatistikleri": hareket_istatistikleri,
+                "timestamp": datetime.now().isoformat()
+            }
+
+            # Web formatına çevir
+            return robot_verisini_web_formatina_cevir(tam_durum)
 
         except Exception as e:
-            self.logger.error(f"❌ Robot data güncelleme hatası: {e}")
+            self.logger.error(f"❌ Robot status alma hatası: {e}")
+            # Hata durumunda cache'den ver
+            with self.veri_kilidi:
+                return self.son_robot_verisi.copy() if self.son_robot_verisi else {}
 
-    def run(self, host: str = '0.0.0.0', port: int = 5000,
-            debug: bool = False):
+    def kapat(self):
+        """Web arayüzünü graceful shutdown yap"""
+        self.logger.info("🌐 Web arayüzü kapatılıyor...")
+
+        # Arka plan thread'ini durdur
+        self.calisma_durumu = False
+
+        # Thread'in bitmesini bekle
+        if hasattr(self, 'arkaplan_thread') and self.arkaplan_thread.is_alive():
+            self.logger.info("🔄 Arka plan thread'i bekleniyor...")
+            self.arkaplan_thread.join(timeout=3)
+            if self.arkaplan_thread.is_alive():
+                self.logger.warning("⚠️ Arka plan thread hala çalışıyor")
+
+        self.logger.info("✅ Web arayüzü kapatıldı")
+
+    def calistir(self, host: str = '0.0.0.0', port: int = 5000,
+                 debug: bool = False):
         """Web sunucusunu başlat"""
         self.logger.info(f"🌐 Web sunucusu başlatılıyor: http://{host}:{port}")
-        self.socketio.run(self.app, host=host, port=port, debug=debug)
+
+        # Flask app'i çalıştır
+        self.app.run(host=host, port=port, debug=debug, threaded=True)
 
 
 # Web arayüzü için yardımcı fonksiyonlar
-def robot_data_to_web_format(robot_data: Dict[str, Any]) -> Dict[str, Any]:
+def robot_verisini_web_formatina_cevir(robot_verisi: Dict[str, Any]) -> Dict[str, Any]:
     """Robot verisini web formatına çevir"""
     try:
-        web_data = {
+        web_verisi = {
             "timestamp": datetime.now().isoformat(),
             "robot_status": {
-                "state": robot_data.get("durum", "bilinmeyen"),
+                "state": "bilinmeyen",
                 "battery_level": 0,
                 "position": {"x": 0, "y": 0, "heading": 0},
                 "mission_progress": 0
@@ -349,68 +507,103 @@ def robot_data_to_web_format(robot_data: Dict[str, Any]) -> Dict[str, Any]:
             }
         }
 
-        # Robot durumu
-        if "durum_bilgisi" in robot_data:
-            durum_bilgisi = robot_data["durum_bilgisi"]
-            web_data["robot_status"]["state"] = durum_bilgisi.get(
-                "durum", "bilinmeyen")
+        # Robot durum bilgisi
+        if "durum_bilgisi" in robot_verisi:
+            durum_bilgisi = robot_verisi["durum_bilgisi"]
+            web_verisi["robot_status"]["state"] = durum_bilgisi.get("durum", "bilinmeyen")
 
-        # Sensör verileri
-        if "sensor_data" in robot_data:
-            sensor_data = robot_data["sensor_data"]
+        # Sensor verileri - yeni format
+        if "sensor_data" in robot_verisi:
+            sensor_verisi = robot_verisi["sensor_data"]
 
-            # GPS
-            if "gps" in sensor_data and sensor_data["gps"]:
-                gps_data = sensor_data["gps"]
-                web_data["sensors"]["gps"] = {
-                    "latitude": gps_data.get("latitude", 0),
-                    "longitude": gps_data.get("longitude", 0),
-                    "satellites": gps_data.get("satellites", 0),
-                    "fix_quality": gps_data.get("fix_quality", 0)
+            # GPS - yeni format
+            if "gps" in sensor_verisi:
+                gps_verisi = sensor_verisi["gps"]
+                web_verisi["sensors"]["gps"] = {
+                    "latitude": gps_verisi.get("latitude", 0),
+                    "longitude": gps_verisi.get("longitude", 0),
+                    "satellites": gps_verisi.get("satellites", 0),
+                    "fix_quality": gps_verisi.get("fix_quality", 0)
                 }
 
-            # IMU
-            if "imu" in sensor_data and sensor_data["imu"]:
-                imu_data = sensor_data["imu"]
-                web_data["sensors"]["imu"] = {
-                    "roll": imu_data.get("roll", 0),
-                    "pitch": imu_data.get("pitch", 0),
-                    "yaw": imu_data.get("yaw", 0),
-                    "temperature": imu_data.get("temperature", 0)
+            # IMU - yeni format
+            if "imu" in sensor_verisi:
+                imu_verisi = sensor_verisi["imu"]
+                web_verisi["sensors"]["imu"] = {
+                    "roll": imu_verisi.get("roll", 0),
+                    "pitch": imu_verisi.get("pitch", 0),
+                    "yaw": imu_verisi.get("yaw", 0),
+                    "temperature": imu_verisi.get("temperature", 0)
                 }
 
-            # Batarya
-            if "batarya" in sensor_data and sensor_data["batarya"]:
-                batarya_data = sensor_data["batarya"]
-                web_data["sensors"]["battery"] = {
-                    "voltage": batarya_data.get("voltage", 0),
-                    "current": batarya_data.get("current", 0),
-                    "level": batarya_data.get("level", 0),
-                    "power": batarya_data.get("power", 0)
+            # Batarya - yeni format (battery key'i kullan)
+            if "battery" in sensor_verisi:
+                batarya_verisi = sensor_verisi["battery"]
+                web_verisi["sensors"]["battery"] = {
+                    "voltage": batarya_verisi.get("voltage", 0),
+                    "current": batarya_verisi.get("current", 0),
+                    "level": batarya_verisi.get("percentage", batarya_verisi.get("level", 0)),
+                    "power": batarya_verisi.get("power", 0)
                 }
-                web_data["robot_status"]["battery_level"] = batarya_data.get(
-                    "level", 0)
+                web_verisi["robot_status"]["battery_level"] = batarya_verisi.get(
+                    "percentage", batarya_verisi.get("level", 0))
+
+            # Eski format desteği - batarya
+            elif "batarya" in sensor_verisi and sensor_verisi["batarya"]:
+                batarya_verisi = sensor_verisi["batarya"]
+                web_verisi["sensors"]["battery"] = {
+                    "voltage": batarya_verisi.get("voltage", 0),
+                    "current": batarya_verisi.get("current", 0),
+                    "level": batarya_verisi.get("level", 0),
+                    "power": batarya_verisi.get("power", 0)
+                }
+                web_verisi["robot_status"]["battery_level"] = batarya_verisi.get("level", 0)
 
         # Konum bilgisi
-        if "konum_bilgisi" in robot_data:
-            konum = robot_data["konum_bilgisi"]
-            web_data["robot_status"]["position"] = {
-                "x": konum.get("x", 0),
-                "y": konum.get("y", 0),
-                "heading": konum.get("theta", 0)
-            }
+        if "konum_bilgisi" in robot_verisi:
+            konum = robot_verisi["konum_bilgisi"]
+            # Konum objesi dataclass ise attribute'lara doğrudan eriş
+            if hasattr(konum, 'x'):
+                web_verisi["robot_status"]["position"] = {
+                    "x": getattr(konum, 'x', 0),
+                    "y": getattr(konum, 'y', 0),
+                    "heading": getattr(konum, 'theta', 0)
+                }
+            # Konum dict ise normal erişim
+            elif isinstance(konum, dict):
+                web_verisi["robot_status"]["position"] = {
+                    "x": konum.get("x", 0),
+                    "y": konum.get("y", 0),
+                    "heading": konum.get("theta", 0)
+                }
+            else:
+                web_verisi["robot_status"]["position"] = {
+                    "x": 0,
+                    "y": 0,
+                    "heading": 0
+                }
 
         # Motor durumu
-        if "motor_durumu" in robot_data:
-            motor_data = robot_data["motor_durumu"]
-            web_data["motors"] = {
-                "left_speed": motor_data.get("hizlar", {}).get("sol", 0),
-                "right_speed": motor_data.get("hizlar", {}).get("sag", 0),
-                "brushes_active": any(motor_data.get("fircalar", {}).values()),
-                "fan_active": motor_data.get("fan", False)
+        if "motor_durumu" in robot_verisi:
+            motor_verisi = robot_verisi["motor_durumu"]
+            web_verisi["motors"] = {
+                "left_speed": motor_verisi.get("hizlar", {}).get("sol", 0),
+                "right_speed": motor_verisi.get("hizlar", {}).get("sag", 0),
+                "brushes_active": any(motor_verisi.get("fircalar", {}).values()),
+                "fan_active": motor_verisi.get("fan", False)
             }
 
-        return web_data
+        # Hareket istatistikleri
+        if "hareket_istatistikleri" in robot_verisi:
+            istatistikler = robot_verisi["hareket_istatistikleri"]
+            web_verisi["mission_stats"] = {
+                "total_distance": istatistikler.get("toplam_mesafe", 0),
+                "working_time": istatistikler.get("hareket_sayisi", 0) * 0.1 / 60,  # Yaklaşık çalışma süresi (dakika)
+                "average_speed": istatistikler.get("ortalama_hiz", 0),
+                "max_speed": istatistikler.get("max_hiz", 0)
+            }
+
+        return web_verisi
 
     except Exception as e:
         logging.getLogger("WebArayuz").error(f"❌ Web data çevirme hatası: {e}")

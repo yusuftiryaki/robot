@@ -67,6 +67,7 @@ class RobotUygulama:
         self.web_only = web_only
         self.robot: Optional[BahceRobotu] = None
         self.web_server: Optional[WebArayuz] = None
+        self.web_thread = None
         self.calisma_durumu = True
 
         # Debug modunda log seviyesini artır
@@ -88,13 +89,22 @@ class RobotUygulama:
 
     def _signal_handler(self, signum, frame):
         """Graceful shutdown için signal handler."""
-        logger.info(f"Çıkış sinyali alındı: {signum}")
+        logger.info(f"🛑 Çıkış sinyali alındı: {signum}")
         self.calisma_durumu = False
 
         # Robot'un da ana döngüsünü durdur
         if self.robot:
             self.robot.calisma_durumu = False
             logger.info("🤖 Robot ana döngüsü durduruldu")
+
+        # Web server'ı da durdur
+        if self.web_server:
+            # Flask app'i durdurmak için calisma_durumu=False yap
+            # Thread join'i temizle() fonksiyonunda yapılacak
+            logger.info("🌐 Web sunucusu kapatılıyor...")
+
+        # Ana döngüyü zorla bitir
+        logger.info("📱 Uygulama kapatılıyor...")
 
     async def robot_baslatma_kontrolu(self) -> bool:
         """
@@ -160,15 +170,6 @@ class RobotUygulama:
                 logger.error("❌ Başlatma kontrolleri başarısız!")
                 return
 
-            # Web sunucusunu başlat
-            logger.info("🌐 Web sunucusu başlatılıyor...")
-            # Web arayüzü başlat
-            web_config = {
-                'secret_key': 'oba_secret_2024',
-                'debug': self.debug
-            }
-            self.web_server = WebArayuz(self.robot, web_config)
-
             # Robot sistemini başlat (web-only modunda değilse)
             if not self.web_only:
                 logger.info("🤖 Robot sistemi başlatılıyor...")
@@ -176,37 +177,35 @@ class RobotUygulama:
                 # Robot nesnesini oluştur
                 self.robot = BahceRobotu()
 
-                # Robot sistemini başlat - ana_dongu() metodunu kullan
-                # Not: ana_dongu() metodu zaten var, basla() yok
-                logger.info("Robot ana döngüsü başlatılıyor...")
-
-                # Web sunucusuna robot referansını ver
-                if hasattr(self.web_server, 'robot_instance'):
-                    self.web_server.robot_instance = self.robot
-                else:
-                    # Web sunucusunu robot ile yeniden oluştur
-                    self.web_server = WebArayuz(self.robot, web_config)
-
                 logger.info("✅ Robot sistemi başarıyla başlatıldı!")
 
-            # Web sunucusunu arka planda başlat
+            # Web arayüzü başlat
+            logger.info("🌐 Web arayüzü başlatılıyor...")
+            web_config = {
+                'secret_key': 'oba_secret_2024',
+                'debug': self.debug
+            }
+            self.web_server = WebArayuz(self.robot, web_config)
+
+            # Web sunucusunu thread'de başlat
             import threading
-            web_thread = threading.Thread(
-                target=self.web_server.run,
+            self.web_thread = threading.Thread(
+                target=self.web_server.calistir,
                 kwargs={'host': '0.0.0.0', 'port': 5000, 'debug': False},
-                daemon=True
+                daemon=False  # Graceful shutdown için daemon=False
             )
-            web_thread.start()
+            self.web_thread.start()
+            logger.info("✅ Web sunucusu thread'de başlatıldı")
 
             # Web sunucusunun başlatılmasını bekle
-            await asyncio.sleep(1)
+            await asyncio.sleep(2)
 
             if not self.web_only:
-                # Robot ana döngüsünü arka planda başlat
+                # Robot ana döngüsünü başlat
                 await self.robot_ana_dongasu()
             else:
                 logger.info("📱 Sadece web arayüzü modu aktif")
-                # Sadece web sunucusunu bekle
+                # Ana döngü - signal handler'ları dinler
                 while self.calisma_durumu:
                     await asyncio.sleep(1)
 
@@ -254,8 +253,18 @@ class RobotUygulama:
             # Web sunucusunu temizle
             if self.web_server:
                 logger.info("🌐 Web sunucusu kapatılıyor...")
-                # WebArayuz'da kapat() metodu yok, sadece referansı sil
+                # WebArayuz'un kapat() metodunu kullan
+                self.web_server.kapat()
+
+                # Thread join'i ile bekle
+                if self.web_thread and self.web_thread.is_alive():
+                    logger.info("🌐 Web thread'i bekleniyor...")
+                    self.web_thread.join(timeout=5)  # 5 saniye bekle
+                    if self.web_thread.is_alive():
+                        logger.warning("⚠️ Web thread hala çalışıyor")
+
                 self.web_server = None
+                self.web_thread = None
 
             logger.info("✅ Temizlik işlemleri tamamlandı")
 

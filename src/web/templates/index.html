@@ -5,7 +5,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>🌱 Otonom Bahçe Asistanı (OBA)</title>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.js"></script>
     <style>
         :root {
             --primary-color: #2E8B57;
@@ -15,7 +14,33 @@
             --dark-color: #2F4F4F;
             --light-color: #F5F5F5;
             --border-radius: 12px;
-            --shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+            --shadow: 0 // Log ekleme
+
+            function addLog(message) {
+                const logContainer=document.getElementById('log-container');
+                const logLine=document.createElement('div');
+                logLine.className='log-line';
+                logLine.style.color='#00ccff'; // Frontend logları mavi
+
+                logLine.textContent=`$ {
+                    new Date().toLocaleTimeString()
+                }
+
+                - $ {
+                    message
+                }
+
+                `;
+                logContainer.appendChild(logLine);
+                logContainer.scrollTop=logContainer.scrollHeight;
+
+                // Maksimum 100 log satırı tut
+                while (logContainer.children.length > 100) {
+                    logContainer.removeChild(logContainer.firstChild);
+                }
+            }
+
+            (0, 0, 0, 0.15);
         }
 
         * {
@@ -498,6 +523,10 @@
         <div class="card">
             <div class="card-header">
                 📋 Sistem Logları
+                <button class="control-button btn-primary" onclick="refreshLogs()"
+                    style="margin-left: auto; padding: 5px 10px; font-size: 0.8rem;">
+                    🔄 Tazeleyici
+                </button>
             </div>
             <div class="log-container" id="log-container">
                 <div class="log-line">🤖 Hacı Abi'nin Bahçe Robotu başlatılıyor...</div>
@@ -515,36 +544,31 @@
     </div>
 
     <script>
-        // Socket.IO bağlantısı
-        const socket = io();
+        // HTTP API tabanlı robot kontrolü
 
         // Global değişkenler
         let isConnected = false;
         let joystickActive = false;
         let joystickCenter = { x: 0, y: 0 };
+        let statusUpdateInterval;
 
-        // Bağlantı olayları
-        socket.on('connect', function () {
-            isConnected = true;
-            updateConnectionStatus(true);
-            addLog('✅ Robot kontrolüne bağlandı');
-        });
-
-        socket.on('disconnect', function () {
-            isConnected = false;
-            updateConnectionStatus(false);
-            addLog('❌ Robot bağlantısı kesildi');
-        });
-
-        // Robot veri güncellemeleri
-        socket.on('robot_data_update', function (data) {
-            updateRobotStatus(data);
-        });
-
-        // Acil durum uyarısı
-        socket.on('emergency_alert', function (data) {
-            showEmergencyPopup(data.message);
-        });
+        // Sayfa yüklendiğinde bağlantı kontrol et
+        function checkConnection() {
+            fetch('/api/robot/status')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        isConnected = true;
+                        updateConnectionStatus(true);
+                        updateRobotStatus(data.data);
+                    }
+                })
+                .catch(error => {
+                    isConnected = false;
+                    updateConnectionStatus(false);
+                    console.error('Bağlantı hatası:', error);
+                });
+        }
 
         // Bağlantı durumunu güncelle
         function updateConnectionStatus(connected) {
@@ -566,7 +590,7 @@
                 // Robot durumu
                 if (data.robot_status) {
                     document.getElementById('robot-state').textContent = data.robot_status.state || '--';
-                    document.getElementById('battery-level').textContent = `${data.robot_status.battery_level || 0}%`;
+                    document.getElementById('battery-level').textContent = `${Math.round(data.robot_status.battery_level || 0)}%`;
                     document.getElementById('mission-progress').textContent = `${data.robot_status.mission_progress || 0}%`;
                 }
 
@@ -587,6 +611,12 @@
                 if (data.sensors && data.sensors.battery) {
                     document.getElementById('battery-voltage').textContent = `${data.sensors.battery.voltage?.toFixed(1) || '--'} V`;
                     document.getElementById('battery-current').textContent = `${data.sensors.battery.current?.toFixed(1) || '--'} A`;
+                }
+
+                // Görev istatistikleri
+                if (data.mission_stats) {
+                    document.getElementById('total-distance').textContent = `${data.mission_stats.total_distance?.toFixed(1) || '--'} m`;
+                    document.getElementById('working-time').textContent = `${data.mission_stats.working_time?.toFixed(1) || '--'} dk`;
                 }
 
             } catch (error) {
@@ -636,46 +666,168 @@
         }
 
         function emergencyStop() {
-            socket.emit('emergency_stop');
-            addLog('🚨 ACİL DURDURMA!');
+            fetch('/api/robot/emergency_stop', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        addLog('🚨 ACİL DURDURMA!');
+                        showEmergencyPopup('ACİL DURDURMA AKTİF!');
+                    } else {
+                        addLog('❌ Acil durdurma hatası: ' + data.error);
+                    }
+                })
+                .catch(error => {
+                    addLog('❌ Acil durdurma isteği hatası: ' + error);
+                });
         }
 
         function sendManualControl(linear, angular) {
-            if (isConnected) {
-                socket.emit('manual_control', {
+            if (!isConnected) return;
+
+            fetch('/api/robot/manual_control', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
                     linear: linear,
                     angular: angular
+                })
+            })
+                .then(response => response.json())
+                .then(data => {
+                    if (!data.success) {
+                        addLog('❌ Manuel kontrol hatası: ' + data.error);
+                    }
+                })
+                .catch(error => {
+                    addLog('❌ Manuel kontrol isteği hatası: ' + error);
                 });
-            }
         }
 
         // Aksesuar kontrolleri
         function toggleBrushes() {
             const active = document.getElementById('brushes-toggle').checked;
-            // Robot'a fırça komutunu gönder
-            addLog(`🌪️ Fırçalar ${active ? 'açıldı' : 'kapatıldı'}`);
+
+            fetch('/api/robot/command', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    command: 'set_brushes',
+                    params: { active: active }
+                })
+            })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        addLog(`🌪️ Fırçalar ${active ? 'açıldı' : 'kapatıldı'}`);
+                    } else {
+                        addLog('❌ Fırça kontrolü hatası: ' + data.error);
+                    }
+                })
+                .catch(error => {
+                    addLog('❌ Fırça kontrolü isteği hatası: ' + error);
+                });
         }
 
         function toggleFan() {
             const active = document.getElementById('fan-toggle').checked;
-            // Robot'a fan komutunu gönder
-            addLog(`🌬️ Fan ${active ? 'açıldı' : 'kapatıldı'}`);
+
+            fetch('/api/robot/command', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    command: 'set_fan',
+                    params: { active: active }
+                })
+            })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        addLog(`🌬️ Fan ${active ? 'açıldı' : 'kapatıldı'}`);
+                    } else {
+                        addLog('❌ Fan kontrolü hatası: ' + data.error);
+                    }
+                })
+                .catch(error => {
+                    addLog('❌ Fan kontrolü isteği hatası: ' + error);
+                });
         }
 
         // Görev kontrolleri
         function startMission(type) {
-            socket.emit('start_mission', { type: type });
-            addLog(`🎯 ${type} görevi başlatıldı`);
+            fetch('/api/robot/start_mission', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    type: type
+                })
+            })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        addLog(`🎯 ${type} görevi başlatıldı`);
+                    } else {
+                        addLog('❌ Görev başlatma hatası: ' + data.error);
+                    }
+                })
+                .catch(error => {
+                    addLog('❌ Görev başlatma isteği hatası: ' + error);
+                });
         }
 
         function stopMission() {
-            socket.emit('stop_mission');
-            addLog('⏸️ Görev durduruldu');
+            fetch('/api/robot/stop_mission', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        addLog('⏸️ Görev durduruldu');
+                    } else {
+                        addLog('❌ Görev durdurma hatası: ' + data.error);
+                    }
+                })
+                .catch(error => {
+                    addLog('❌ Görev durdurma isteği hatası: ' + error);
+                });
         }
 
         function returnToDock() {
-            // Şarj istasyonuna dönme komutunu gönder
-            addLog('🔌 Şarj istasyonuna dönülüyor');
+            fetch('/api/robot/command', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    command: 'return_to_dock'
+                })
+            })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        addLog('🔌 Şarj istasyonuna dönülüyor');
+                    } else {
+                        addLog('❌ Şarj istasyonu dönüş hatası: ' + data.error);
+                    }
+                })
+                .catch(error => {
+                    addLog('❌ Şarj istasyonu dönüş isteği hatası: ' + error);
+                });
         }
 
         // Joystick kontrolü
@@ -764,24 +916,93 @@
             addLog('✅ Acil durum temizlendi');
         }
 
+        // Robot loglarını backend'den yükle
+        async function loadRobotLogs() {
+            try {
+                const response = await fetch('/api/robot/logs');
+                const data = await response.json();
+
+                if (data.success && data.logs) {
+                    const logContainer = document.getElementById('log-container');
+
+                    // Mevcut frontend logları koru (son 20 tanesini)
+                    const frontendLogs = [];
+                    const existingLogs = logContainer.getElementsByClassName('log-line');
+                    for (let i = Math.max(0, existingLogs.length - 20); i < existingLogs.length; i++) {
+                        if (existingLogs[i].style.color === 'rgb(0, 204, 255)') { // Frontend logları
+                            frontendLogs.push(existingLogs[i].textContent);
+                        }
+                    }
+
+                    // Container'ı temizle
+                    logContainer.innerHTML = '';
+
+                    // Önce robot loglarını ekle
+                    data.logs.forEach(log => {
+                        if (log.trim()) {
+                            const logLine = document.createElement('div');
+                            logLine.className = 'log-line';
+                            logLine.style.color = '#00ff00'; // Robot logları yeşil
+                            logLine.textContent = log;
+                            logContainer.appendChild(logLine);
+                        }
+                    });
+
+                    // Sonra frontend loglarını ekle
+                    if (frontendLogs.length > 0) {
+                        // Ayırıcı çizgi
+                        const separator = document.createElement('div');
+                        separator.className = 'log-line';
+                        separator.style.color = '#ffff00';
+                        separator.textContent = '=== Web Arayüzü Logları ===';
+                        logContainer.appendChild(separator);
+
+                        frontendLogs.forEach(log => {
+                            const logLine = document.createElement('div');
+                            logLine.className = 'log-line';
+                            logLine.style.color = '#00ccff'; // Frontend logları mavi
+                            logLine.textContent = log;
+                            logContainer.appendChild(logLine);
+                        });
+                    }
+
+                    // En alta scroll et
+                    logContainer.scrollTop = logContainer.scrollHeight;
+
+                    addLog('✅ Robot logları yüklendi');
+                } else {
+                    addLog('❌ Robot logları yüklenemedi: ' + (data.error || 'Bilinmeyen hata'));
+                }
+            } catch (error) {
+                addLog('❌ Robot logları yüklenirken hata: ' + error.message);
+                console.error('Robot logları yükleme hatası:', error);
+            }
+        }
+
+        // Log tazeleme fonksiyonu
+        function refreshLogs() {
+            addLog('🔄 Loglar tazeleniyor...');
+            loadRobotLogs();
+        }
         // Sayfa yüklendiğinde
         document.addEventListener('DOMContentLoaded', function () {
             initJoystick();
             addLog('🚀 Web arayüzü başlatıldı');
 
-            // Periyodik status güncellemesi
-            setInterval(function () {
-                if (isConnected) {
-                    fetch('/api/robot/status')
-                        .then(response => response.json())
-                        .then(data => {
-                            if (data.success) {
-                                updateRobotStatus(data.data);
-                            }
-                        })
-                        .catch(error => console.error('Status güncelleme hatası:', error));
-                }
+            // İlk bağlantı kontrolü
+            checkConnection();
+
+            // İlk robot loglarını yükle
+            setTimeout(function () {
+                loadRobotLogs();
+            }, 1000); // 1 saniye sonra yükle
+
+            // Periyodik bağlantı ve status güncellemesi
+            statusUpdateInterval = setInterval(function () {
+                checkConnection();
             }, 2000); // 2 saniyede bir güncelle
+
+            addLog('✅ HTTP API tabanlı robot kontrolü hazır');
         });
     </script>
 </body>

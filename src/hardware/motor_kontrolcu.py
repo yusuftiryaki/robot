@@ -79,8 +79,34 @@ class MotorKontrolcu:
         self.tekerlek_base = 0.235  # metre
         self.enkoder_pulse_per_rev = 360
 
+        # Log throttle mekanizması - spam önleme
+        self.log_throttle_interval = 5.0  # saniye
+        self.last_log_times = {
+            "firca_start": 0.0,
+            "firca_stop": 0.0
+        }
+
         self.logger.info(f"⚙️ Motor kontrolcü başlatıldı (Simülasyon: {self.simulation_mode})")
         self._init_motors()
+
+    def _should_log(self, log_key: str) -> bool:
+        """
+        Log throttle kontrolü - belirlenen süre geçmişse log'a izin ver
+
+        Args:
+            log_key: Log tipi anahtarı (firca_start, firca_stop, vs.)
+
+        Returns:
+            True: Log'a izin ver
+            False: Log'ı atla (spam önleme)
+        """
+        current_time = time.time()
+        last_log_time = self.last_log_times.get(log_key, 0.0)
+
+        if current_time - last_log_time >= self.log_throttle_interval:
+            self.last_log_times[log_key] = current_time
+            return True
+        return False
 
     def _is_simulation(self) -> bool:
         """Simülasyon modunda mı kontrol et"""
@@ -271,7 +297,10 @@ class MotorKontrolcu:
             yan: Yan fırçalar dahil mi?
         """
         if aktif:
-            self.logger.info("🌪️ Fırçalar çalıştırılıyor...")
+            # Log throttle - sadece 5 saniyede bir defa logla
+            if self._should_log("firca_start"):
+                self.logger.info("🌪️ Fırçalar çalıştırılıyor...")
+
             if ana:
                 self.firca_durumu["ana"] = True
                 await self._ana_firca_calistir(True)
@@ -281,7 +310,10 @@ class MotorKontrolcu:
                 self.firca_durumu["sag"] = True
                 await self._yan_fircalari_calistir(True)
         else:
-            self.logger.info("⏸️ Fırçalar durduruluyor...")
+            # Log throttle - sadece 5 saniyede bir defa logla
+            if self._should_log("firca_stop"):
+                self.logger.info("⏸️ Fırçalar durduruluyor...")
+
             self.firca_durumu = {"ana": False, "sol": False, "sag": False}
             await self._ana_firca_calistir(False)
             await self._yan_fircalari_calistir(False)
