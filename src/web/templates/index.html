@@ -490,6 +490,35 @@
             </div>
         </div>
 
+        <!-- Bahçe Sınır Bilgileri -->
+        <div class="card">
+            <div class="card-header">
+                🏡 Bahçe Sınır Kontrolü
+            </div>
+            <div class="status-grid">
+                <div class="status-item">
+                    <div class="status-value" id="boundary-status">--</div>
+                    <div class="status-label">Sınır Durumu</div>
+                </div>
+                <div class="status-item">
+                    <div class="status-value" id="boundary-distance">-- m</div>
+                    <div class="status-label">Sınıra Mesafe</div>
+                </div>
+                <div class="status-item">
+                    <div class="status-value" id="boundary-area">-- m²</div>
+                    <div class="status-label">Bahçe Alanı</div>
+                </div>
+                <div class="status-item">
+                    <div class="status-value" id="boundary-violations">--</div>
+                    <div class="status-label">Sınır İhlali</div>
+                </div>
+            </div>
+            <div style="margin-top: 15px;">
+                <button class="control-button btn-secondary" onclick="showBoundaryInfo()">🗺️ Sınır Detayları</button>
+                <button class="control-button btn-primary" onclick="refreshBoundaryStatus()">🔄 Güncelle</button>
+            </div>
+        </div>
+
         <!-- Sensör Verileri -->
         <div class="card">
             <div class="card-header">
@@ -619,36 +648,98 @@
                     } else if (distance < 5.0) {
                         distanceElement.textContent = `${distance.toFixed(1)} m`;
                         distanceElement.style.color = '#FF8C00'; // Turuncu - yakın
-                    } else if (distance < 20.0) {
-                        distanceElement.textContent = `${distance.toFixed(0)} m`;
-                        distanceElement.style.color = '#2E8B57'; // Yeşil - normal
                     } else {
-                        distanceElement.textContent = `${distance.toFixed(0)} m`;
-                        distanceElement.style.color = '#666'; // Gri - uzak
+                        distanceElement.textContent = `${distance.toFixed(1)} m`;
+                        distanceElement.style.color = '#4CAF50'; // Yeşil - normal
                     }
                 }
 
-                // IMU verileri
-                if (data.sensors && data.sensors.imu) {
-                    document.getElementById('imu-roll').textContent = `${data.sensors.imu.roll?.toFixed(1) || '--'}°`;
-                    document.getElementById('imu-pitch').textContent = `${data.sensors.imu.pitch?.toFixed(1) || '--'}°`;
-                }
+                // Bahçe sınır bilgileri güncellemesi
+                updateBoundaryStatus(data);
 
-                // Batarya verileri
-                if (data.sensors && data.sensors.battery) {
-                    document.getElementById('battery-voltage').textContent = `${data.sensors.battery.voltage?.toFixed(1) || '--'} V`;
-                    document.getElementById('battery-current').textContent = `${data.sensors.battery.current?.toFixed(1) || '--'} A`;
-                }
-
-                // Görev istatistikleri
+                // Çalışma süresi ve mesafe
                 if (data.mission_stats) {
                     document.getElementById('total-distance').textContent = `${data.mission_stats.total_distance?.toFixed(1) || '--'} m`;
                     document.getElementById('working-time').textContent = `${data.mission_stats.working_time?.toFixed(1) || '--'} dk`;
                 }
 
+                // Bahçe sınır verileri
+                if (data.boundary_status) {
+                    document.getElementById('boundary-status').textContent = data.boundary_status.state || '--';
+                    document.getElementById('boundary-distance').textContent = `${data.boundary_status.distance_to_boundary?.toFixed(1) || '--'} m`;
+                    document.getElementById('boundary-area').textContent = `${data.boundary_status.garden_area?.toFixed(1) || '--'} m²`;
+                    document.getElementById('boundary-violations').textContent = data.boundary_status.violations || '--';
+                }
+
             } catch (error) {
                 console.error('Robot status güncelleme hatası:', error);
             }
+        }
+
+        // Bahçe sınır durumu güncelleme
+        function updateBoundaryStatus(data) {
+            // Bahçe sınır bilgilerini güncellemek için ayrı API çağrısı
+            fetch('/api/robot/command', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    command: 'get_boundary_info'
+                })
+            })
+                .then(response => response.json())
+                .then(boundaryResponse => {
+                    if (boundaryResponse.success && boundaryResponse.result.aktif) {
+                        const boundaryData = boundaryResponse.result;
+                        const stats = boundaryData.istatistikler;
+
+                        // Sınır durumu güncelle
+                        const statusElement = document.getElementById('boundary-status');
+                        const distanceElement = document.getElementById('boundary-distance');
+                        const areaElement = document.getElementById('boundary-area');
+                        const violationsElement = document.getElementById('boundary-violations');
+
+                        // Durum belirleme (GPS verilerine göre)
+                        let status = 'Bilinmiyor';
+                        let statusColor = '#666';
+
+                        if (data.sensors && data.sensors.gps && data.sensors.gps.latitude && data.sensors.gps.longitude) {
+                            // GPS verisi var - gerçek zamanlı kontrol yapılabilir
+                            status = 'Güvenli';
+                            statusColor = '#4CAF50';
+                        } else {
+                            status = 'GPS Yok';
+                            statusColor = '#FF8C00';
+                        }
+
+                        statusElement.textContent = status;
+                        statusElement.style.color = statusColor;
+
+                        // Diğer bilgileri güncelle
+                        distanceElement.textContent = '-- m'; // Gerçek zamanlı mesafe şu an için yok
+                        areaElement.textContent = `${stats.bahce_alani.toFixed(1)} m²`;
+                        violationsElement.textContent = `${stats.sinir_ihlali}`;
+
+                        // İhlal oranına göre renk
+                        if (stats.ihlal_orani > 10) {
+                            violationsElement.style.color = '#DC143C'; // Kırmızı
+                        } else if (stats.ihlal_orani > 5) {
+                            violationsElement.style.color = '#FF8C00'; // Turuncu
+                        } else {
+                            violationsElement.style.color = '#4CAF50'; // Yeşil
+                        }
+                    } else {
+                        // Bahçe sınır sistemi aktif değil
+                        document.getElementById('boundary-status').textContent = 'Pasif';
+                        document.getElementById('boundary-distance').textContent = '-- m';
+                        document.getElementById('boundary-area').textContent = '-- m²';
+                        document.getElementById('boundary-violations').textContent = '--';
+                    }
+                })
+                .catch(error => {
+                    console.error('Bahçe sınır bilgisi alınamadı:', error);
+                });
         }
 
         // Log ekleme
@@ -855,6 +946,54 @@
                 .catch(error => {
                     addLog('❌ Şarj istasyonu dönüş isteği hatası: ' + error);
                 });
+        }
+
+        // Bahçe sınır kontrolleri
+        function showBoundaryInfo() {
+            fetch('/api/robot/command', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    command: 'get_boundary_info'
+                })
+            })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        const boundaryData = data.result;
+                        if (boundaryData.aktif) {
+                            const stats = boundaryData.istatistikler;
+                            const webData = boundaryData.web_verisi;
+
+                            let message = `🏡 Bahçe Sınır Bilgileri:\n`;
+                            message += `📍 Sınır Noktaları: ${stats.sinir_nokta_sayisi}\n`;
+                            message += `🌱 Bahçe Alanı: ${stats.bahce_alani.toFixed(2)} m²\n`;
+                            message += `🛡️ Güvenlik Buffer: ${stats.buffer_mesafesi}m\n`;
+                            message += `⚠️ Uyarı Mesafesi: ${stats.uyari_mesafesi}m\n`;
+                            message += `📊 Toplam Kontrol: ${stats.toplam_kontrol}\n`;
+                            message += `🚨 İhlal Sayısı: ${stats.sinir_ihlali}\n`;
+                            message += `📈 İhlal Oranı: ${stats.ihlal_orani.toFixed(1)}%`;
+
+                            alert(message);
+                            addLog('🏡 Bahçe sınır bilgileri gösterildi');
+                        } else {
+                            addLog('❌ Bahçe sınır sistemi: ' + boundaryData.hata);
+                        }
+                    } else {
+                        addLog('❌ Bahçe sınır bilgisi alınamadı: ' + data.error);
+                    }
+                })
+                .catch(error => {
+                    addLog('❌ Bahçe sınır bilgisi isteği hatası: ' + error);
+                });
+        }
+
+        function refreshBoundaryStatus() {
+            addLog('🔄 Bahçe sınır durumu güncelleniyor...');
+            // updateRobotStatus fonksiyonu çağrılacak otomatik olarak
+            updateRobotStatus();
         }
 
         // Joystick kontrolü

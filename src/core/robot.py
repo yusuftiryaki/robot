@@ -18,6 +18,7 @@ from core.guvenlik_sistemi import GuvenlikSistemi
 from core.smart_config import load_smart_config
 from hardware.motor_kontrolcu import HareketKomut, MotorKontrolcu
 from hardware.sensor_okuyucu import SensorOkuyucu
+from navigation.bahce_sinir_kontrol import BahceSinirKontrol
 from navigation.konum_takipci import KonumTakipci
 from navigation.rota_planlayici import RotaPlanlayici
 from vision.kamera_islemci import KameraIslemci
@@ -178,6 +179,19 @@ class BahceRobotu:
         except Exception as e:
             self.logger.error(f"❌ Rota planlayıcı hatası: {e}")
             self.rota_planlayici = None
+
+        # Bahçe sınır kontrol sistemi
+        try:
+            mowing_config = self.config.get("missions", {}).get("mowing", {})
+            if mowing_config.get("boundary_coordinates"):
+                self.bahce_sinir_kontrol = BahceSinirKontrol(mowing_config)
+                self.logger.info("✅ Bahçe sınır kontrol sistemi hazır")
+            else:
+                self.logger.warning("⚠️ Bahçe sınır koordinatları bulunamadı")
+                self.bahce_sinir_kontrol = None
+        except Exception as e:
+            self.logger.error(f"❌ Bahçe sınır kontrol hatası: {e}")
+            self.bahce_sinir_kontrol = None
 
         # Vision & AI - güvenli başlatma
         try:
@@ -346,22 +360,57 @@ class BahceRobotu:
             self.durum_degistir(RobotDurumu.SARJ_ARAMA)
             return
 
+        # 🏡 Bahçe sınır kontrolü - EN ÖNEMLİ!
+        if self.bahce_sinir_kontrol:
+            gps_data = sensor_data.get("gps", {})
+            if gps_data.get("latitude") and gps_data.get("longitude"):
+                sinir_sonuc = self.bahce_sinir_kontrol.robot_konumunu_kontrol_et(
+                    gps_data["latitude"], gps_data["longitude"]
+                )
+
+                if not sinir_sonuc.guvenli_bolgede:
+                    self.logger.warning(f"🚨 SİNİR İHLALİ: {sinir_sonuc.aciklama}")
+
+                    # Güvenli yöne hareket et
+                    if sinir_sonuc.onerilenen_yon is not None:
+                        hareket_komut = HareketKomut(
+                            linear_hiz=0.1,  # Yavaş hareket
+                            angular_hiz=sinir_sonuc.onerilenen_yon * 0.3,  # Güvenli yöne dön
+                            sure=1.0
+                        )
+
+                        if self.motor_kontrolcu:
+                            await self.motor_kontrolcu.hareket_uygula(hareket_komut)
+                            # Fırçaları durdur - güvenlik için
+                            await self.motor_kontrolcu.fircalari_calistir(False)
+
+                        return  # Güvenli yöne hareket ettiğimiz için işlem durdur
+                    else:
+                        # Acil duruma geç
+                        await self._acil_durum_isle("Bahçe sınır ihlali - güvenli yön bulunamadı")
+                        return
+
         # Kamera ile engel kontrolü
-        kamera_data = await self.kamera_islemci.engel_analiz_et()
+        kamera_data = {}
+        if self.kamera_islemci:
+            kamera_data = await self.kamera_islemci.engel_analiz_et()
 
         # AI karar verme
-        karar = await self.karar_verici.next_action_belirle(sensor_data, kamera_data)
+        karar = None
+        if self.karar_verici:
+            karar = await self.karar_verici.next_action_belirle(sensor_data, kamera_data)
 
         # Motor hareketini uygula - Dict'i HareketKomut'a çevir
-        from hardware.motor_kontrolcu import HareketKomut
-        hareket_komut = HareketKomut(
-            linear_hiz=karar.hareket.get("linear", 0.0),
-            angular_hiz=karar.hareket.get("angular", 0.0)
-        )
-        await self.motor_kontrolcu.hareket_uygula(hareket_komut)
+        if karar:
+            hareket_komut = HareketKomut(
+                linear_hiz=karar.hareket.get("linear", 0.0),
+                angular_hiz=karar.hareket.get("angular", 0.0)
+            )
+            if self.motor_kontrolcu:
+                await self.motor_kontrolcu.hareket_uygula(hareket_komut)
 
-        # Fırçaları çalıştır
-        await self.motor_kontrolcu.fircalari_calistir(True)
+                # Fırçaları çalıştır - sadece güvenli bölgedeyken
+                await self.motor_kontrolcu.fircalari_calistir(True)
 
     async def _sarj_arama_durumu(self, sensor_data: Dict[str, Any]):
         """🔍 GPS destekli şarj istasyonu arama"""
@@ -636,6 +685,34 @@ class BahceRobotu:
             "zaman": datetime.now().isoformat()
         }
 
+    def get_bahce_sinir_bilgileri(self) -> Dict[str, Any]:
+        """🏡 Bahçe sınır bilgilerini al"""
+        if not self.bahce_sinir_kontrol:
+            return {"aktif": False, "hata": "Bahçe sınır kontrol sistemi bulunamadı"}
+
+        try:
+            return {
+                "aktif": True,
+                "istatistikler": self.bahce_sinir_kontrol.get_boundary_stats(),
+                "web_verisi": self.bahce_sinir_kontrol.visualize_boundary_for_web(),
+                "merkez": {
+                    "lat": self.bahce_sinir_kontrol.get_boundary_center().latitude,
+                    "lon": self.bahce_sinir_kontrol.get_boundary_center().longitude
+                }
+            }
+        except Exception as e:
+            self.logger.error(f"❌ Bahçe sınır bilgisi alınamadı: {e}")
+            return {"aktif": False, "hata": str(e)}
+
+    def sarj_istasyonuna_git(self):
+        """🔋 Şarj istasyonuna gitme komutunu başlat"""
+        if self.durum == RobotDurumu.ACIL_DURUM:
+            self.logger.warning("⚠️ Acil durumda şarj komutu iptal edildi")
+            return
+
+        self.logger.info("🔋 Şarj istasyonuna gitme komutu alındı")
+        self.durum_degistir(RobotDurumu.SARJ_ARAMA)
+
     def _log_smart_config_info(self):
         """Akıllı config bilgilerini logla"""
         runtime_info = self.config.get("runtime", {})
@@ -671,22 +748,11 @@ class BahceRobotu:
         self.logger.info(f"📡 Sahte Sensörler: {'✅ Aktif' if mock_sensors else '❌ Pasif'}")
         self.logger.info(f"🌐 Web Port: {web_port}")
 
-        self.logger.info("=" * 50)
-
-    def sarj_istasyonuna_git(self):
-        """🔋 Şarj istasyonuna gitme komutunu başlat"""
-        self.logger.info("🔋 Şarj istasyonuna gitme komutu alındı")
-
-        # Durumu SARJ_ARAMA'ya geçir
-        self.durum_degistir(RobotDurumu.SARJ_ARAMA)
-
-        # Şarj istasyonu koordinatlarını kontrol et
-        dock_config = self.config.get("missions", {}).get("charging", {}).get("dock_gps")
-        if dock_config:
-            dock_lat = dock_config.get("latitude")
-            dock_lon = dock_config.get("longitude")
-            self.logger.info(f"🎯 Hedef şarj istasyonu: ({dock_lat}, {dock_lon})")
+        # Bahçe sınır bilgisi
+        if hasattr(self, 'bahce_sinir_kontrol') and self.bahce_sinir_kontrol:
+            self.logger.info("🏡 Bahçe Sınır Kontrol: ✅ Aktif")
+            self.logger.info(f"🌱 Bahçe Alanı: {self.bahce_sinir_kontrol.bahce_alani:.2f} m²")
         else:
-            self.logger.warning("⚠️ Şarj istasyonu GPS koordinatları bulunamadı")
+            self.logger.info("🏡 Bahçe Sınır Kontrol: ❌ Pasif")
 
-        return True
+        self.logger.info("=" * 50)

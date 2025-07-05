@@ -84,6 +84,25 @@ missions:
     overlap: 0.1 # metre
     speed: 0.3 # m/s
 
+    # Bahçe sınır koordinatları (GPS lat/lon)
+    boundary_coordinates:
+      # Koordinatlar saat yönünde verilmeli (polygon için)
+      - latitude: 39.933500 # Kuzey-batı köşe
+        longitude: 32.859500
+      - latitude: 39.933600 # Kuzey-doğu köşe
+        longitude: 32.859900
+      - latitude: 39.933300 # Güney-doğu köşe
+        longitude: 32.859850
+      - latitude: 39.933200 # Güney-batı köşe
+        longitude: 32.859450
+
+    # Güvenlik parametreleri
+    boundary_safety:
+      buffer_distance: 1.0 # metre - sınırdan ne kadar uzak durulsun
+      warning_distance: 2.0 # metre - uyarı mesafesi
+      max_deviation: 0.5 # metre - GPS hata toleransı
+      check_frequency: 10 # saniye - sınır kontrol sıklığı
+
   charging:
     battery_low_threshold: 20 # %
     battery_full_threshold: 95 # %

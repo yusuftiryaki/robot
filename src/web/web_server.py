@@ -276,6 +276,13 @@ class WebArayuz:
             # Robot'a fan komutunu gönder
             return f"Fan {'açıldı' if aktif else 'kapatıldı'}"
 
+        elif komut == "get_boundary_info":
+            # Bahçe sınır bilgilerini al
+            if hasattr(self.robot, 'get_bahce_sinir_bilgileri'):
+                return self.robot.get_bahce_sinir_bilgileri()
+            else:
+                return {"aktif": False, "hata": "Robot bahçe sınır fonksiyonuna sahip değil"}
+
         elif komut == "return_to_dock":
             # Şarj istasyonuna dönme komutunu gönder
             if hasattr(self.robot, 'sarj_istasyonuna_git'):
