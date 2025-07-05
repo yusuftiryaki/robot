@@ -8,6 +8,7 @@ Durum makinesi prensibi ile çalışır - güvenli ve öngörülebilir.
 
 import asyncio
 import logging
+import math
 from datetime import datetime
 from enum import Enum
 from typing import Any, Dict
@@ -15,7 +16,7 @@ from typing import Any, Dict
 from ai.karar_verici import KararVerici
 from core.guvenlik_sistemi import GuvenlikSistemi
 from core.smart_config import load_smart_config
-from hardware.motor_kontrolcu import MotorKontrolcu
+from hardware.motor_kontrolcu import HareketKomut, MotorKontrolcu
 from hardware.sensor_okuyucu import SensorOkuyucu
 from navigation.konum_takipci import KonumTakipci
 from navigation.rota_planlayici import RotaPlanlayici
@@ -363,21 +364,169 @@ class BahceRobotu:
         await self.motor_kontrolcu.fircalari_calistir(True)
 
     async def _sarj_arama_durumu(self, sensor_data: Dict[str, Any]):
-        """🔍 Şarj istasyonunu ara ve yönel"""
-        self.logger.info("🔋 Şarj istasyonu aranıyor...")
+        """🔍 GPS destekli şarj istasyonu arama"""
+        self.logger.info("🔋 GPS destekli şarj istasyonu aranıyor...")
 
         # Fırçaları durdur - enerji tasarrufu
-        await self.motor_kontrolcu.fircalari_calistir(False)
+        if self.motor_kontrolcu:
+            await self.motor_kontrolcu.fircalari_calistir(False)
 
-        # Şarj istasyonuna yönelme rotası hesapla
-        sarj_rota = await self.rota_planlayici.sarj_istasyonu_rotasi()
+        # GPS şarj istasyonu konfigürasyonunu al
+        gps_dock_config = self.config.get("missions", {}).get("charging", {}).get("dock_gps")
+        approach_config = self.config.get("missions", {}).get("charging", {}).get("approach", {})
 
-        if sarj_rota:
-            await self.motor_kontrolcu.hareket_uygula(sarj_rota)
+        if not gps_dock_config:
+            self.logger.warning("⚠️ GPS şarj konfigürasyonu yok, kamera arama moduna geçiliyor")
+            await self._kamera_sarj_arama(sensor_data)
+            return
 
-            # Şarj istasyonu görünür mü?
+        # Mevcut konumdan şarj istasyonuna mesafe analizi
+        if self.konum_takipci:
+            dock_lat = gps_dock_config.get("latitude")
+            dock_lon = gps_dock_config.get("longitude")
+            accuracy = gps_dock_config.get("accuracy_radius", 3.0)
+
+            gps_analiz = self.konum_takipci.gps_hedef_dogrulugu(dock_lat, dock_lon, accuracy)
+            mesafe = gps_analiz["mesafe"]
+            dogruluk = gps_analiz["dogruluk_seviyesi"]
+
+            self.logger.info(f"📍 Şarj istasyonu: {mesafe:.1f}m uzakta ({dogruluk})")
+
+            # Mesafeye göre strateji belirleme
+            gps_range = approach_config.get("gps_range", 10.0)
+            final_range = approach_config.get("final_range", 2.0)
+
+            if mesafe <= final_range:
+                # Son mesafe - kamera ve sensörlerle hassas yaklaşım
+                await self._hassas_sarj_yaklasimu(sensor_data, gps_analiz)
+            elif mesafe <= gps_range:
+                # Orta mesafe - GPS rehberli yaklaşım
+                await self._gps_sarj_yaklasimu(sensor_data, gps_analiz, gps_dock_config)
+            else:
+                # Uzak mesafe - A* ile genel planlama
+                await self._uzak_sarj_planlamasi(sensor_data, gps_analiz, gps_dock_config)
+        else:
+            self.logger.warning("⚠️ Konum takipçi yok, fallback arama")
+            await self._kamera_sarj_arama(sensor_data)
+
+    async def _hassas_sarj_yaklasimu(self, sensor_data: Dict[str, Any], gps_analiz: Dict[str, Any]):
+        """🎯 Son mesafede hassas yaklaşım (kamera + sensörler)"""
+        self.logger.info("🎯 Hassas şarj yaklaşımı - kamera aktif")
+
+        # Kamera ile şarj istasyonu ara
+        kamera_data = await self.kamera_islemci.sarj_istasyonu_ara()
+
+        if kamera_data.get("sarj_istasyonu_gorunur"):
+            # Kamera ile görüldü - AI karar verici devreye
+            if self.karar_verici:
+                karar = await self.karar_verici._sarj_arama_karari(kamera_data)
+                hareket_komut = HareketKomut(
+                    linear_hiz=karar.hareket.get("linear", 0.05),  # Çok yavaş
+                    angular_hiz=karar.hareket.get("angular", 0.0),
+                    sure=0.5
+                )
+                if self.motor_kontrolcu:
+                    await self.motor_kontrolcu.hareket_uygula(hareket_komut)
+
+            # Şarja çok yakınsa docking moduna geç
+            if kamera_data.get("mesafe", 10) < 0.5:
+                self.logger.info("🔌 Docking mesafesinde - şarj moduna geçiliyor")
+                self.durum_degistir(RobotDurumu.SARJ_OLMA)
+        else:
+            # Kamera görmüyor - GPS yönünde yavaş hareket
+            bearing = math.radians(gps_analiz["bearing"])
+            hareket_komut = HareketKomut(
+                linear_hiz=0.05,  # 5 cm/s
+                angular_hiz=bearing * 0.1,  # Yavaş dönüş
+                sure=1.0
+            )
+            if self.motor_kontrolcu:
+                await self.motor_kontrolcu.hareket_uygula(hareket_komut)
+
+    async def _gps_sarj_yaklasimu(self, sensor_data: Dict[str, Any], gps_analiz: Dict[str, Any], gps_dock_config: Dict[str, Any]):
+        """🧭 GPS rehberli orta mesafe yaklaşımı"""
+        self.logger.info("🧭 GPS rehberli yaklaşım")
+
+        # GPS destekli rota hesapla
+        if self.rota_planlayici and self.konum_takipci:
+            sarj_rota = await self.rota_planlayici.sarj_istasyonu_rotasi(
+                konum_takipci=self.konum_takipci,
+                gps_dock_config=gps_dock_config
+            )
+
+            if sarj_rota and len(sarj_rota) > 0:
+                # İlk waypoint'e git
+                next_waypoint = sarj_rota[0]
+
+                # Hedefe yön
+                bearing = math.radians(gps_analiz["bearing"])
+                hareket_komut = HareketKomut(
+                    linear_hiz=next_waypoint.hiz,
+                    angular_hiz=bearing * 0.2,  # GPS yönünde dönüş
+                    sure=2.0
+                )
+
+                if self.motor_kontrolcu:
+                    await self.motor_kontrolcu.hareket_uygula(hareket_komut)
+            else:
+                self.logger.warning("⚠️ GPS rota oluşturulamadı")
+
+    async def _uzak_sarj_planlamasi(self, sensor_data: Dict[str, Any], gps_analiz: Dict[str, Any], gps_dock_config: Dict[str, Any]):
+        """🗺️ Uzak mesafeden genel planlama"""
+        self.logger.info("🗺️ Uzak mesafe - A* planlama aktif")
+
+        # Detaylı rota planlaması
+        if self.rota_planlayici and self.konum_takipci:
+            sarj_rota = await self.rota_planlayici._uzak_mesafe_planlamasi(
+                self.konum_takipci.get_mevcut_konum(),
+                gps_dock_config["latitude"],
+                gps_dock_config["longitude"],
+                self.konum_takipci
+            )
+
+            if sarj_rota and len(sarj_rota) > 0:
+                # Rotanın ilk bölümünü uygula
+                for waypoint in sarj_rota[:3]:  # İlk 3 waypoint
+                    hareket_komut = HareketKomut(
+                        linear_hiz=waypoint.hiz,
+                        angular_hiz=waypoint.yon * 0.1,
+                        sure=1.0
+                    )
+                    if self.motor_kontrolcu:
+                        await self.motor_kontrolcu.hareket_uygula(hareket_komut)
+
+    async def _kamera_sarj_arama(self, sensor_data: Dict[str, Any]):
+        """📷 GPS olmadan kamera ile şarj arama (fallback)"""
+        self.logger.info("📷 Fallback: Kamera ile şarj arama")
+
+        # Kamera ile şarj istasyonu ara
+        if self.kamera_islemci:
             kamera_data = await self.kamera_islemci.sarj_istasyonu_ara()
+
             if kamera_data.get("sarj_istasyonu_gorunur"):
+                # AI karar verici ile hareket planla
+                if self.karar_verici:
+                    karar = await self.karar_verici._sarj_arama_karari(kamera_data)
+                    hareket_komut = HareketKomut(
+                        linear_hiz=karar.hareket.get("linear", 0.1),
+                        angular_hiz=karar.hareket.get("angular", 0.0),
+                        sure=1.0
+                    )
+                    if self.motor_kontrolcu:
+                        await self.motor_kontrolcu.hareket_uygula(hareket_komut)
+
+                # Yakında ise docking
+                if kamera_data.get("mesafe", 10) < 1.0:
+                    self.durum_degistir(RobotDurumu.SARJ_OLMA)
+            else:
+                # Şarj istasyonu görmüyor - dönerek ara
+                hareket_komut = HareketKomut(
+                    linear_hiz=0.0,
+                    angular_hiz=0.3,  # Yavaş dönüş
+                    sure=2.0
+                )
+                if self.motor_kontrolcu:
+                    await self.motor_kontrolcu.hareket_uygula(hareket_komut)
                 self.durum_degistir(RobotDurumu.SARJ_OLMA)
 
     async def _sarj_olma_durumu(self, sensor_data: Dict[str, Any]):
@@ -385,7 +534,8 @@ class BahceRobotu:
         self.logger.info("🔌 Şarj oluyor...")
 
         # Motorları durdur
-        await self.motor_kontrolcu.durdur()
+        if self.motor_kontrolcu:
+            await self.motor_kontrolcu.durdur()
 
         batarya_seviye = sensor_data.get("batarya", {}).get("seviye", 0)
         hedef_seviye = self.config.get("missions", {}).get(
@@ -403,12 +553,13 @@ class BahceRobotu:
         self.durum = RobotDurumu.ACIL_DURUM
 
         # Hemen durdur
-        await self.motor_kontrolcu.acil_durdur()
+        if self.motor_kontrolcu:
+            await self.motor_kontrolcu.acil_durdur()
 
     async def _acil_durum_bekle(self):
         """🚨 Acil durumda bekle"""
         # Güvenlik sistemi temizlenene kadar bekle
-        if not self.guvenlik_sistemi.acil_durum_aktif:
+        if self.guvenlik_sistemi and not self.guvenlik_sistemi.acil_durum_aktif:
             self.logger.info("✅ Acil durum temizlendi")
             self.durum = self.onceki_durum or RobotDurumu.BEKLEME
 
@@ -416,7 +567,8 @@ class BahceRobotu:
         """❌ Hata durumunu işle"""
         self.logger.error(f"❌ Hata: {hata_mesaji}")
         self.durum = RobotDurumu.HATA
-        await self.motor_kontrolcu.durdur()
+        if self.motor_kontrolcu:
+            await self.motor_kontrolcu.durdur()
 
     async def _hata_durumu(self):
         """❌ Hata durumunda bekle"""
@@ -425,11 +577,30 @@ class BahceRobotu:
         self.durum = RobotDurumu.BEKLEME
 
     def durum_degistir(self, yeni_durum: RobotDurumu):
-        """Durum değiştir ve logla"""
+        """🔄 Durum değiştir ve sensör okuyucuya bildir"""
         self.onceki_durum = self.durum
         self.durum = yeni_durum
         self.logger.info(
             f"🔄 Durum değişti: {self.onceki_durum.value} → {yeni_durum.value}")
+
+        # 🧠 Sensör okuyucuya robotun yeni durumunu bildir
+        if self.sensor_okuyucu:
+            # Motor kontrolcüden mevcut hızları al
+            linear_vel = 0.0
+            angular_vel = 0.0
+
+            if self.motor_kontrolcu:
+                motor_speeds = self.motor_kontrolcu.get_current_speeds()
+                linear_vel = motor_speeds.get("linear", 0.0)
+                angular_vel = motor_speeds.get("angular", 0.0)
+
+            # Durum adını string olarak çevir
+            state_str = yeni_durum.value
+
+            # Sensör okuyucuya bildir
+            self.sensor_okuyucu.update_robot_state(state_str, linear_vel, angular_vel)
+
+            self.logger.debug(f"📡 Sensör simülasyonu güncellendi: {state_str}, v={linear_vel:.2f}, ω={angular_vel:.2f}")
 
     def gorev_baslat(self):
         """Dışarıdan görev başlatma"""
@@ -451,7 +622,8 @@ class BahceRobotu:
         """Robot'u güvenli şekilde kapat"""
         self.logger.info("👋 Robot kapatılıyor...")
         self.calisma_durumu = False
-        await self.motor_kontrolcu.durdur()
+        if self.motor_kontrolcu:
+            await self.motor_kontrolcu.durdur()
         self.logger.info("✅ Robot güvenli şekilde kapatıldı!")
 
     def get_durum_bilgisi(self) -> Dict[str, Any]:
@@ -500,3 +672,21 @@ class BahceRobotu:
         self.logger.info(f"🌐 Web Port: {web_port}")
 
         self.logger.info("=" * 50)
+
+    def sarj_istasyonuna_git(self):
+        """🔋 Şarj istasyonuna gitme komutunu başlat"""
+        self.logger.info("🔋 Şarj istasyonuna gitme komutu alındı")
+
+        # Durumu SARJ_ARAMA'ya geçir
+        self.durum_degistir(RobotDurumu.SARJ_ARAMA)
+
+        # Şarj istasyonu koordinatlarını kontrol et
+        dock_config = self.config.get("missions", {}).get("charging", {}).get("dock_gps")
+        if dock_config:
+            dock_lat = dock_config.get("latitude")
+            dock_lon = dock_config.get("longitude")
+            self.logger.info(f"🎯 Hedef şarj istasyonu: ({dock_lat}, {dock_lon})")
+        else:
+            self.logger.warning("⚠️ Şarj istasyonu GPS koordinatları bulunamadı")
+
+        return True

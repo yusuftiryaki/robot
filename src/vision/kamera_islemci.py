@@ -151,10 +151,17 @@ class KameraIslemci:
         self.logger = logging.getLogger("KameraIslemci")
 
         # Kamera parametreleri - Config'ten al
-        self.resolution = tuple((
-            camera_config.get("resolution", {}).get("width", 640),
-            camera_config.get("resolution", {}).get("height", 480)
-        ))
+        # Resolution - hem [width, height] hem de {width: x, height: y} formatlarını destekle
+        resolution_config = camera_config.get("resolution", [640, 480])
+        if isinstance(resolution_config, list):
+            # [width, height] formatında
+            self.resolution = tuple(resolution_config)
+        else:
+            # {width: x, height: y} formatında
+            self.resolution = tuple((
+                resolution_config.get("width", 640),
+                resolution_config.get("height", 480)
+            ))
         self.framerate = camera_config.get("fps", 30)
         self.device_id = camera_config.get("device_id", 0)
         self.auto_exposure = camera_config.get("auto_exposure", True)

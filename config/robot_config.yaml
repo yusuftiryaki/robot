@@ -89,6 +89,19 @@ missions:
     battery_full_threshold: 95 # %
     dock_approach_speed: 0.1 # m/s
 
+    # Şarj istasyonu GPS koordinatları
+    dock_gps:
+      latitude: 39.933400 # Ankara Kızılay (örnek)
+      longitude: 32.859742
+      altitude: 850.0 # deniz seviyesinden yükseklik (metre)
+      accuracy_radius: 3.0 # GPS hata payı (metre)
+
+    # Şarj istasyonu yaklaşım parametreleri
+    approach:
+      gps_range: 10.0 # GPS ile 10m yaklaştığında kamera devreye girer
+      final_range: 2.0 # Son 2m kamera + sensörlerle
+      precision_range: 0.5 # Son 50cm hassas yerleştirme
+
 # Web Arayüzü
 web:
   host: "0.0.0.0"

@@ -57,6 +57,17 @@ class PowerData:
     level: float  # batarya seviyesi %
 
 
+@dataclass
+class RobotState:
+    """Robot durumu - sensör simülasyonu için"""
+    state: str  # "bekleme", "hareket", "sarj", "gorev"
+    linear_velocity: float  # m/s
+    angular_velocity: float  # rad/s
+    position: Dict[str, float]  # {"x": 0.0, "y": 0.0, "heading": 0.0}
+    is_moving: bool
+    timestamp: float
+
+
 class SensorOkuyucu:
     """
     📡 Ana Sensör Okuyucu Sınıfı
@@ -77,6 +88,20 @@ class SensorOkuyucu:
         self.sensors_aktif = False
         self.son_okuma_zamani = {}
 
+        # 🧠 Akıllı simülasyon için robot durumu takibi
+        self.robot_state = RobotState(
+            state="bekleme",
+            linear_velocity=0.0,
+            angular_velocity=0.0,
+            position={"x": 0.0, "y": 0.0, "heading": 0.0},
+            is_moving=False,
+            timestamp=time.time()
+        )
+
+        # Simülasyon için sabit konum (bekleme modunda)
+        self.base_position = {"lat": 39.9334, "lon": 32.8597}
+        self.current_position = self.base_position.copy()
+
         # Kalibrasyon verileri
         self.imu_kalibrasyon: Dict[str, Dict[str, float]] = {
             "accel_offset": {"x": 0.0, "y": 0.0, "z": 0.0},
@@ -89,6 +114,69 @@ class SensorOkuyucu:
 
         self.logger.info(f"📡 Sensör okuyucu başlatıldı (Simülasyon: {self.simulation_mode})")
         self._init_sensors()
+
+    def update_robot_state(self, state: str, linear_vel: float = 0.0, angular_vel: float = 0.0):
+        """
+        🧠 Robot durumunu güncelle - Akıllı simülasyon için
+
+        Args:
+            state: Robot durumu ("bekleme", "hareket", "sarj", "gorev")
+            linear_vel: Linear hız m/s
+            angular_vel: Açısal hız rad/s
+        """
+        old_state = self.robot_state.state
+        self.robot_state.state = state
+        self.robot_state.linear_velocity = linear_vel
+        self.robot_state.angular_velocity = angular_vel
+        self.robot_state.is_moving = abs(linear_vel) > 0.01 or abs(angular_vel) > 0.01
+        self.robot_state.timestamp = time.time()
+
+        if old_state != state:
+            self.logger.info(f"🔄 Robot durumu değişti: {old_state} → {state}")
+            if state == "bekleme":
+                self.logger.info("⏸️ Bekleme modunda - konum sabit")
+            elif state == "hareket":
+                self.logger.info(f"🚀 Hareket modunda - hız: {linear_vel:.2f} m/s")
+            elif state == "sarj":
+                self.logger.info("🔋 Şarj modunda - konum sabit")
+
+    def _update_position_simulation(self, dt: float):
+        """
+        🗺️ Simülasyon konumunu güncelle
+
+        Args:
+            dt: Delta time (saniye)
+        """
+        if not self.robot_state.is_moving:
+            return  # Hareket halinde değilse konum değişmez
+
+        # Linear hareket
+        if abs(self.robot_state.linear_velocity) > 0.01:
+            # Hareket yönü (heading)
+            heading_rad = math.radians(self.robot_state.position["heading"])
+
+            # Konum değişikliği
+            dx = self.robot_state.linear_velocity * math.cos(heading_rad) * dt
+            dy = self.robot_state.linear_velocity * math.sin(heading_rad) * dt
+
+            # GPS koordinatlarına dönüştür (yaklaşık)
+            # 1 derece latitude ~ 111 km
+            # 1 derece longitude ~ 111 km * cos(latitude)
+            lat_delta = dy / 111000.0
+            lon_delta = dx / (111000.0 * math.cos(math.radians(self.current_position["lat"])))
+
+            self.current_position["lat"] += lat_delta
+            self.current_position["lon"] += lon_delta
+
+            self.robot_state.position["x"] += dx
+            self.robot_state.position["y"] += dy
+
+        # Angular hareket
+        if abs(self.robot_state.angular_velocity) > 0.01:
+            heading_delta = math.degrees(self.robot_state.angular_velocity * dt)
+            self.robot_state.position["heading"] += heading_delta
+            # Heading'i 0-360 arası tut
+            self.robot_state.position["heading"] = self.robot_state.position["heading"] % 360
 
     def _is_simulation(self) -> bool:
         """Simülasyon modunda mı kontrol et"""
@@ -308,32 +396,82 @@ class SensorOkuyucu:
             return None
 
     async def _simulation_imu_oku(self) -> Dict[str, Any]:
-        """Simülasyon IMU verisi - Config'ten alınan değerlerle"""
-        # Zamanla biraz salınım ekle
-        t = time.time() - self.simulation_time_start
+        """🧠 Akıllı IMU simülasyonu - Robot durumuna göre"""
+        current_time = time.time()
+        t = current_time - self.simulation_time_start
 
         # Config'ten IMU ayarlarını al
         imu_config = self.simulation_data.get("imu_config", {})
         update_rate = imu_config.get('update_rate', 100)  # Hz
+        freq_multiplier = update_rate / 100.0
 
-        # Update rate'e göre salınım frekansını ayarla
-        freq_multiplier = update_rate / 100.0  # 100Hz'e göre normalize et
+        # Robot durumuna göre IMU verisi
+        if self.robot_state.state == "bekleme":
+            # Bekleme modunda minimal titreşim
+            imu_data = IMUData(
+                accel_x=0.02 * math.sin(t * 0.1),  # Çok küçük titreşim
+                accel_y=0.02 * math.cos(t * 0.1),
+                accel_z=9.81 + 0.01 * math.sin(t * 0.05),  # Gravity + minimal noise
+                gyro_x=0.005 * math.sin(t * 0.2),  # Minimal dönme
+                gyro_y=0.005 * math.cos(t * 0.2),
+                gyro_z=0.002 * math.sin(t * 0.1),
+                roll=0.2 * math.sin(t * 0.05),    # Çok küçük roll
+                pitch=0.1 * math.cos(t * 0.05),   # Çok küçük pitch
+                yaw=self.robot_state.position["heading"],  # Sabit yaw
+                temperature=25.0 + 0.5 * math.sin(t * 0.02)  # Minimal sıcaklık değişimi
+            )
 
-        # Simülasyon değerleri
-        base_data = self.simulation_data.get("imu_orientation", {})
+        elif self.robot_state.state in ["hareket", "gorev"]:
+            # Hareket modunda gerçekçi IMU verileri
+            linear_vel = self.robot_state.linear_velocity
+            angular_vel = self.robot_state.angular_velocity
 
-        imu_data = IMUData(
-            accel_x=0.1 * math.sin(t * 0.5 * freq_multiplier),
-            accel_y=0.1 * math.cos(t * 0.3 * freq_multiplier),
-            accel_z=9.81 + 0.05 * math.sin(t * freq_multiplier),
-            gyro_x=0.02 * math.sin(t * 0.8 * freq_multiplier),
-            gyro_y=0.02 * math.cos(t * 0.6 * freq_multiplier),
-            gyro_z=0.01 * math.sin(t * 0.4 * freq_multiplier),
-            roll=base_data.get("roll", 0) + 2 * math.sin(t * 0.2 * freq_multiplier),
-            pitch=base_data.get("pitch", 0) + 1 * math.cos(t * 0.3 * freq_multiplier),
-            yaw=base_data.get("yaw", 0) + 0.5 * t % 360,
-            temperature=25.0 + 2 * math.sin(t * 0.1 * freq_multiplier)
-        )
+            # Hızlanma simülasyonu
+            accel_magnitude = abs(linear_vel) * 2.0  # m/s²
+
+            imu_data = IMUData(
+                accel_x=accel_magnitude * math.cos(math.radians(self.robot_state.position["heading"])) + 0.1 * math.sin(t * freq_multiplier),
+                accel_y=accel_magnitude * math.sin(math.radians(self.robot_state.position["heading"])) + 0.1 * math.cos(t * freq_multiplier),
+                accel_z=9.81 + 0.2 * math.sin(t * 0.5),  # Gravity + hareket gürültüsü
+                gyro_x=angular_vel * 0.5 + 0.1 * math.sin(t * freq_multiplier),
+                gyro_y=0.05 * math.cos(t * freq_multiplier),
+                gyro_z=angular_vel + 0.02 * math.sin(t * freq_multiplier),
+                roll=5 * math.sin(t * 0.3) * (abs(linear_vel) / 2.0),  # Hıza göre roll
+                pitch=3 * math.cos(t * 0.4) * (abs(linear_vel) / 2.0),  # Hıza göre pitch
+                yaw=self.robot_state.position["heading"],
+                temperature=25.0 + 3 * math.sin(t * 0.1)  # Hareket sıcaklığı
+            )
+
+        elif self.robot_state.state == "sarj":
+            # Şarj modunda tamamen sabit
+            imu_data = IMUData(
+                accel_x=0.0,
+                accel_y=0.0,
+                accel_z=9.81,  # Sadece gravity
+                gyro_x=0.0,
+                gyro_y=0.0,
+                gyro_z=0.0,
+                roll=0.0,
+                pitch=0.0,
+                yaw=self.robot_state.position["heading"],
+                temperature=25.0 + 0.2 * math.sin(t * 0.01)  # Çok minimal sıcaklık
+            )
+
+        else:
+            # Varsayılan durum
+            base_data = self.simulation_data.get("imu_orientation", {})
+            imu_data = IMUData(
+                accel_x=0.05 * math.sin(t * 0.5),
+                accel_y=0.05 * math.cos(t * 0.3),
+                accel_z=9.81 + 0.02 * math.sin(t),
+                gyro_x=0.01 * math.sin(t * 0.8),
+                gyro_y=0.01 * math.cos(t * 0.6),
+                gyro_z=0.005 * math.sin(t * 0.4),
+                roll=base_data.get("roll", 0) + 1 * math.sin(t * 0.2),
+                pitch=base_data.get("pitch", 0) + 0.5 * math.cos(t * 0.3),
+                yaw=base_data.get("yaw", 0) + 0.2 * t % 360,
+                temperature=25.0 + 1 * math.sin(t * 0.1)
+            )
 
         return asdict(imu_data)
 
@@ -385,24 +523,76 @@ class SensorOkuyucu:
             return None
 
     async def _simulation_gps_oku(self) -> Dict[str, Any]:
-        """Simülasyon GPS verisi"""
-        base_coords = self.simulation_data.get("gps_coordinates", {})
-        t = time.time() - self.simulation_time_start
+        """🧠 Akıllı GPS simülasyonu - Robot durumuna göre"""
+        current_time = time.time()
+        dt = current_time - self.robot_state.timestamp
 
-        # Rastgele hareket simülasyonu
-        lat_offset = 0.0001 * math.sin(t * 0.1)
-        lon_offset = 0.0001 * math.cos(t * 0.1)
+        # Konum güncelleme
+        self._update_position_simulation(dt)
+        self.robot_state.timestamp = current_time
 
-        gps_data = GPSData(
-            latitude=base_coords.get("lat", 39.9334) + lat_offset,
-            longitude=base_coords.get("lon", 32.8597) + lon_offset,
-            altitude=850.0 + 5 * math.sin(t * 0.05),
-            satellites=8,
-            fix_quality=1,
-            speed=0.5 + 0.2 * math.sin(t * 0.3),
-            course=45.0 + 10 * math.sin(t * 0.2),
-            timestamp=datetime.now().isoformat()
-        )
+        # Robot durumuna göre GPS verisi
+        if self.robot_state.state == "bekleme":
+            # Bekleme modunda konum sabit, sadece minimal gürültü
+            noise_lat = 0.000001 * math.sin(current_time * 0.01)  # Çok küçük gürültü
+            noise_lon = 0.000001 * math.cos(current_time * 0.01)
+
+            gps_data = GPSData(
+                latitude=self.current_position["lat"] + noise_lat,
+                longitude=self.current_position["lon"] + noise_lon,
+                altitude=850.0 + 0.5 * math.sin(current_time * 0.02),  # Minimal yükseklik değişimi
+                satellites=8,
+                fix_quality=1,
+                speed=0.0,  # Bekleme modunda hız sıfır
+                course=self.robot_state.position["heading"],
+                timestamp=datetime.now().isoformat()
+            )
+
+        elif self.robot_state.state in ["hareket", "gorev"]:
+            # Hareket modunda gerçekçi konum değişimi
+            # GPS hassasiyetine göre hafif gürültü ekle
+            noise_lat = 0.00001 * math.sin(current_time * 0.5)
+            noise_lon = 0.00001 * math.cos(current_time * 0.7)
+
+            # Hız simülasyonu - robot hızına göre
+            simulated_speed = abs(self.robot_state.linear_velocity) * 3.6  # m/s to km/h
+
+            gps_data = GPSData(
+                latitude=self.current_position["lat"] + noise_lat,
+                longitude=self.current_position["lon"] + noise_lon,
+                altitude=850.0 + 2 * math.sin(current_time * 0.1),
+                satellites=7 + int(math.sin(current_time * 0.3)),  # 7-8 uydu
+                fix_quality=1,
+                speed=simulated_speed,
+                course=self.robot_state.position["heading"],
+                timestamp=datetime.now().isoformat()
+            )
+
+        elif self.robot_state.state == "sarj":
+            # Şarj modunda konum tamamen sabit
+            gps_data = GPSData(
+                latitude=self.current_position["lat"],
+                longitude=self.current_position["lon"],
+                altitude=850.0,
+                satellites=8,
+                fix_quality=1,
+                speed=0.0,
+                course=self.robot_state.position["heading"],
+                timestamp=datetime.now().isoformat()
+            )
+
+        else:
+            # Varsayılan durum
+            gps_data = GPSData(
+                latitude=self.current_position["lat"],
+                longitude=self.current_position["lon"],
+                altitude=850.0,
+                satellites=6,
+                fix_quality=0,
+                speed=0.0,
+                course=0.0,
+                timestamp=datetime.now().isoformat()
+            )
 
         return asdict(gps_data)
 
@@ -447,29 +637,61 @@ class SensorOkuyucu:
             return None
 
     async def _simulation_batarya_oku(self) -> Dict[str, Any]:
-        """Simülasyon batarya verisi - Config'ten alınan değerlerle"""
-        t = time.time() - self.simulation_time_start
+        """🧠 Akıllı batarya simülasyonu - Robot durumuna göre"""
+        current_time = time.time()
+        t = current_time - self.simulation_time_start
 
         # Config'ten batarya ayarlarını al
         battery_config = self.simulation_data.get('battery_config', {})
         initial_level = battery_config.get('initial_level', 85)
-        drain_rate = battery_config.get('drain_rate', 0.1)  # %/hour
-
-        # Batarya yavaş yavaş azalır
+        base_drain_rate = battery_config.get('drain_rate', 0.1)  # %/hour
         base_current = self.simulation_data.get("battery_current", 1.2)
 
-        # Batarya seviyesi zamanla azalır (drain_rate kullanılıyor)
-        hours_passed = t / 3600  # saniye -> saat
-        current_level = max(20.0, initial_level - (hours_passed * drain_rate))
+        # Robot durumuna göre batarya tüketimi
+        if self.robot_state.state == "bekleme":
+            # Bekleme modunda minimal tüketim
+            drain_multiplier = 0.3  # %30 normal tüketim
+            current_multiplier = 0.5  # %50 normal akım
 
-        # Voltage seviyeye göre hesapla
-        voltage = 12.6 * (current_level / 100) + 0.1 * math.sin(t * 0.2)
-        current = base_current + 0.3 * math.sin(t * 0.5)
+        elif self.robot_state.state in ["hareket", "gorev"]:
+            # Hareket modunda yüksek tüketim
+            speed_factor = abs(self.robot_state.linear_velocity) + abs(self.robot_state.angular_velocity)
+            drain_multiplier = 1.0 + speed_factor * 0.5  # Hıza göre artış
+            current_multiplier = 1.0 + speed_factor * 0.3
+
+        elif self.robot_state.state == "sarj":
+            # Şarj modunda batarya seviyesi artıyor
+            drain_multiplier = -2.0  # Negatif = şarj oluyor
+            current_multiplier = -0.8  # Negatif akım = şarj akımı
+
+        else:
+            # Varsayılan normal tüketim
+            drain_multiplier = 1.0
+            current_multiplier = 1.0
+
+        # Batarya seviyesi hesapla
+        hours_passed = t / 3600  # saniye -> saat
+        effective_drain = base_drain_rate * drain_multiplier * hours_passed
+        current_level = initial_level - effective_drain
+
+        # Şarj durumunda batarya seviyesini sınırla
+        if self.robot_state.state == "sarj":
+            current_level = min(100.0, current_level)  # %100'ü geçmesin
+        else:
+            current_level = max(10.0, current_level)  # %10'un altına düşmesin
+
+        # Voltage ve current hesapla
+        voltage = 12.6 * (current_level / 100) + 0.05 * math.sin(t * 0.2)
+        current = base_current * current_multiplier + 0.1 * math.sin(t * 0.5)
+
+        # Şarj durumunda voltage biraz daha yüksek
+        if self.robot_state.state == "sarj":
+            voltage += 0.5  # Şarj voltajı
 
         power_data = PowerData(
-            voltage=voltage,
+            voltage=max(10.0, voltage),  # Minimum 10V
             current=current,
-            power=voltage * current,
+            power=voltage * abs(current),
             level=current_level
         )
 

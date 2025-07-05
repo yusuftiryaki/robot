@@ -408,6 +408,10 @@
                         <div class="status-label">GPS Uydu</div>
                     </div>
                     <div class="status-item">
+                        <div class="status-value" id="dock-distance">-- m</div>
+                        <div class="status-label">Şarj Mesafesi</div>
+                    </div>
+                    <div class="status-item">
                         <div class="status-value" id="mission-progress">--%</div>
                         <div class="status-label">İlerleme</div>
                     </div>
@@ -599,6 +603,29 @@
                     document.getElementById('gps-satellites').textContent = data.sensors.gps.satellites || '--';
                     document.getElementById('gps-lat').textContent = `${data.sensors.gps.latitude?.toFixed(6) || '--'}°`;
                     document.getElementById('gps-lon').textContent = `${data.sensors.gps.longitude?.toFixed(6) || '--'}°`;
+                }
+
+                // Şarj istasyonu mesafesi
+                if (data.dock_distance !== undefined) {
+                    const distance = data.dock_distance;
+                    const distanceElement = document.getElementById('dock-distance');
+
+                    if (distance === null || distance === undefined) {
+                        distanceElement.textContent = '-- m';
+                        distanceElement.style.color = '#666';
+                    } else if (distance < 1.0) {
+                        distanceElement.textContent = `${(distance * 100).toFixed(0)} cm`;
+                        distanceElement.style.color = '#DC143C'; // Kırmızı - çok yakın
+                    } else if (distance < 5.0) {
+                        distanceElement.textContent = `${distance.toFixed(1)} m`;
+                        distanceElement.style.color = '#FF8C00'; // Turuncu - yakın
+                    } else if (distance < 20.0) {
+                        distanceElement.textContent = `${distance.toFixed(0)} m`;
+                        distanceElement.style.color = '#2E8B57'; // Yeşil - normal
+                    } else {
+                        distanceElement.textContent = `${distance.toFixed(0)} m`;
+                        distanceElement.style.color = '#666'; // Gri - uzak
+                    }
                 }
 
                 // IMU verileri

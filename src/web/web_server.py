@@ -11,7 +11,6 @@ Mobile-first tasarım ile:
 
 import asyncio
 import logging
-import threading
 import time
 from datetime import datetime
 from functools import wraps
@@ -279,7 +278,11 @@ class WebArayuz:
 
         elif komut == "return_to_dock":
             # Şarj istasyonuna dönme komutunu gönder
-            return "Şarj istasyonuna dönülüyor"
+            if hasattr(self.robot, 'sarj_istasyonuna_git'):
+                self.robot.sarj_istasyonuna_git()
+                return "Şarj istasyonuna gitme başlatıldı"
+            else:
+                return "Robot şarj fonksiyonuna sahip değil"
 
         else:
             raise ValueError(f"Bilinmeyen komut: {komut}")
@@ -434,13 +437,22 @@ class WebArayuz:
             }
 
             # Web formatına çevir
-            return robot_verisini_web_formatina_cevir(tam_durum)
+            web_verisi = self._robot_veri_to_web_veri(tam_durum)
+
+            # Şarj istasyonu bilgilerini ekle
+            dock_distance = self._sarj_istasyonu_mesafesi_hesapla()
+            web_verisi["dock_distance"] = dock_distance
+
+            # Şarj istasyonu detaylarını ekle
+            charging_station_info = self._sarj_istasyonu_bilgileri_al()
+            web_verisi["charging_station"] = charging_station_info
+
+            return web_verisi
 
         except Exception as e:
             self.logger.error(f"❌ Robot status alma hatası: {e}")
-            # Hata durumunda cache'den ver
-            with self.veri_kilidi:
-                return self.son_robot_verisi.copy() if self.son_robot_verisi else {}
+            # Hata durumunda basit dict döndür
+            return {"error": "Robot status alınamadı", "timestamp": datetime.now().isoformat()}
 
     def kapat(self):
         """Web arayüzünü graceful shutdown yap"""
@@ -473,134 +485,238 @@ class WebArayuz:
         # Flask app'i çalıştır
         self.app.run(host=final_host, port=final_port, debug=final_debug, threaded=True)
 
+    def _sarj_istasyonu_mesafesi_hesapla(self) -> Optional[float]:
+        """🔋 Şarj istasyonuna GPS mesafesi hesapla"""
+        try:
+            if not self.robot or not hasattr(self.robot, 'config'):
+                return None
 
-# Web arayüzü için yardımcı fonksiyonlar
-def robot_verisini_web_formatina_cevir(robot_verisi: Dict[str, Any]) -> Dict[str, Any]:
-    """Robot verisini web formatına çevir"""
-    try:
-        web_verisi = {
-            "timestamp": datetime.now().isoformat(),
-            "robot_status": {
-                "state": "bilinmeyen",
-                "battery_level": 0,
-                "position": {"x": 0, "y": 0, "heading": 0},
-                "mission_progress": 0
-            },
-            "sensors": {
-                "gps": {"latitude": 0, "longitude": 0, "satellites": 0},
-                "imu": {"roll": 0, "pitch": 0, "yaw": 0},
-                "battery": {"voltage": 0, "current": 0, "level": 0},
-                "obstacles": []
-            },
-            "motors": {
-                "left_speed": 0,
-                "right_speed": 0,
-                "brushes_active": False,
-                "fan_active": False
-            }
-        }
+            # Şarj istasyonu GPS koordinatları
+            dock_config = self.robot.config.get("missions", {}).get("charging", {}).get("dock_gps")
+            if not dock_config:
+                self.logger.debug("⚠️ Şarj istasyonu GPS konfigürasyonu yok")
+                return None
 
-        # Robot durum bilgisi
-        if "durum_bilgisi" in robot_verisi:
-            durum_bilgisi = robot_verisi["durum_bilgisi"]
-            web_verisi["robot_status"]["state"] = durum_bilgisi.get("durum", "bilinmeyen")
+            dock_lat = dock_config.get("latitude")
+            dock_lon = dock_config.get("longitude")
 
-        # Sensor verileri - yeni format
-        if "sensor_data" in robot_verisi:
-            sensor_verisi = robot_verisi["sensor_data"]
+            if not dock_lat or not dock_lon:
+                return None
 
-            # GPS - yeni format
-            if "gps" in sensor_verisi:
-                gps_verisi = sensor_verisi["gps"]
-                web_verisi["sensors"]["gps"] = {
-                    "latitude": gps_verisi.get("latitude", 0),
-                    "longitude": gps_verisi.get("longitude", 0),
-                    "satellites": gps_verisi.get("satellites", 0),
-                    "fix_quality": gps_verisi.get("fix_quality", 0)
-                }
+            # Konum takipçiden mevcut konumu al
+            if hasattr(self.robot, 'konum_takipci') and self.robot.konum_takipci:
+                try:
+                    mesafe = self.robot.konum_takipci.get_mesafe_to_gps(dock_lat, dock_lon)
+                    self.logger.debug(f"🗺️ Şarj istasyonu mesafesi: {mesafe:.2f}m")
+                    return mesafe
+                except Exception as e:
+                    self.logger.debug(f"❌ GPS mesafe hesaplama hatası: {e}")
+                    return None
 
-            # IMU - yeni format
-            if "imu" in sensor_verisi:
-                imu_verisi = sensor_verisi["imu"]
-                web_verisi["sensors"]["imu"] = {
-                    "roll": imu_verisi.get("roll", 0),
-                    "pitch": imu_verisi.get("pitch", 0),
-                    "yaw": imu_verisi.get("yaw", 0),
-                    "temperature": imu_verisi.get("temperature", 0)
-                }
+            return None
 
-            # Batarya - yeni format (battery key'i kullan)
-            if "battery" in sensor_verisi:
-                batarya_verisi = sensor_verisi["battery"]
-                web_verisi["sensors"]["battery"] = {
-                    "voltage": batarya_verisi.get("voltage", 0),
-                    "current": batarya_verisi.get("current", 0),
-                    "level": batarya_verisi.get("percentage", batarya_verisi.get("level", 0)),
-                    "power": batarya_verisi.get("power", 0)
-                }
-                web_verisi["robot_status"]["battery_level"] = batarya_verisi.get(
-                    "percentage", batarya_verisi.get("level", 0))
+        except Exception as e:
+            self.logger.error(f"❌ Şarj mesafesi hesaplama hatası: {e}")
+            return None
 
-            # Eski format desteği - batarya
-            elif "batarya" in sensor_verisi and sensor_verisi["batarya"]:
-                batarya_verisi = sensor_verisi["batarya"]
-                web_verisi["sensors"]["battery"] = {
-                    "voltage": batarya_verisi.get("voltage", 0),
-                    "current": batarya_verisi.get("current", 0),
-                    "level": batarya_verisi.get("level", 0),
-                    "power": batarya_verisi.get("power", 0)
-                }
-                web_verisi["robot_status"]["battery_level"] = batarya_verisi.get("level", 0)
+    def _sarj_istasyonu_bilgileri_al(self) -> Optional[Dict[str, Any]]:
+        """🔋 Şarj istasyonu konfigürasyon bilgilerini al"""
+        try:
+            if not self.robot or not hasattr(self.robot, 'config'):
+                return None
 
-        # Konum bilgisi
-        if "konum_bilgisi" in robot_verisi:
-            konum = robot_verisi["konum_bilgisi"]
-            # Konum objesi dataclass ise attribute'lara doğrudan eriş
-            if hasattr(konum, 'x'):
-                web_verisi["robot_status"]["position"] = {
-                    "x": getattr(konum, 'x', 0),
-                    "y": getattr(konum, 'y', 0),
-                    "heading": getattr(konum, 'theta', 0)
-                }
-            # Konum dict ise normal erişim
-            elif isinstance(konum, dict):
-                web_verisi["robot_status"]["position"] = {
-                    "x": konum.get("x", 0),
-                    "y": konum.get("y", 0),
-                    "heading": konum.get("theta", 0)
-                }
-            else:
-                web_verisi["robot_status"]["position"] = {
-                    "x": 0,
-                    "y": 0,
-                    "heading": 0
-                }
+            # Şarj istasyonu konfigürasyonu
+            dock_config = self.robot.config.get("missions", {}).get("charging", {}).get("dock_gps")
+            if not dock_config:
+                return None
 
-        # Motor durumu
-        if "motor_durumu" in robot_verisi:
-            motor_verisi = robot_verisi["motor_durumu"]
-            web_verisi["motors"] = {
-                "left_speed": motor_verisi.get("hizlar", {}).get("sol", 0),
-                "right_speed": motor_verisi.get("hizlar", {}).get("sag", 0),
-                "brushes_active": any(motor_verisi.get("fircalar", {}).values()),
-                "fan_active": motor_verisi.get("fan", False)
+            # GPS koordinatları
+            dock_lat = dock_config.get("latitude")
+            dock_lon = dock_config.get("longitude")
+
+            if not dock_lat or not dock_lon:
+                return None
+
+            # Şarj istasyonu bilgileri
+            charging_config = self.robot.config.get("missions", {}).get("charging", {})
+
+            station_info = {
+                "gps_coordinates": {
+                    "latitude": dock_lat,
+                    "longitude": dock_lon
+                },
+                "error_margin": dock_config.get("error_margin", 3.0),
+                "approach_speeds": charging_config.get("approach_speeds", {}),
+                "distance_thresholds": charging_config.get("distance_thresholds", {}),
+                "configured": True
             }
 
-        # Hareket istatistikleri
-        if "hareket_istatistikleri" in robot_verisi:
-            istatistikler = robot_verisi["hareket_istatistikleri"]
-            web_verisi["mission_stats"] = {
-                "total_distance": istatistikler.get("toplam_mesafe", 0),
-                "working_time": istatistikler.get("hareket_sayisi", 0) * 0.1 / 60,  # Yaklaşık çalışma süresi (dakika)
-                "average_speed": istatistikler.get("ortalama_hiz", 0),
-                "max_speed": istatistikler.get("max_hiz", 0)
+            # Mesafe hesapla (varsa)
+            if hasattr(self.robot, 'konum_takipci') and self.robot.konum_takipci:
+                try:
+                    distance = self.robot.konum_takipci.get_mesafe_to_gps(dock_lat, dock_lon)
+                    bearing = self.robot.konum_takipci.get_bearing_to_gps(dock_lat, dock_lon)
+                    accuracy = self.robot.konum_takipci.gps_hedef_dogrulugu(dock_lat, dock_lon, distance)
+
+                    station_info["distance"] = distance
+                    station_info["bearing"] = bearing
+                    station_info["accuracy"] = accuracy
+
+                except Exception as e:
+                    self.logger.debug(f"❌ GPS hesaplama hatası: {e}")
+
+            return station_info
+
+        except Exception as e:
+            self.logger.error(f"❌ Şarj istasyonu bilgisi alma hatası: {e}")
+            return None
+
+    def robot_data_guncelle(self, robot_data: Dict[str, Any]):
+        """
+        Robot verilerini güncelle
+        Bu metod dış sistemler tarafından robot verilerini güncellemek için kullanılır.
+        """
+        try:
+            # Robot verilerini güncelle
+            if hasattr(self, 'robot') and self.robot:
+                # Eğer robot nesnesi varsa, onun verilerini güncelle
+                self.robot.son_veri_guncelleme = datetime.now()
+
+            self.logger.info(f"✅ Robot verileri güncellendi: {len(robot_data)} anahtar")
+
+        except Exception as e:
+            self.logger.error(f"❌ Robot veri güncelleme hatası: {e}")
+            raise
+
+    def _robot_veri_to_web_veri(self, robot_verisi: Dict[str, Any]) -> Dict[str, Any]:
+        """Robot verisini web formatına çevir"""
+        try:
+            web_verisi = {
+                "timestamp": datetime.now().isoformat(),
+                "robot_status": {
+                    "state": "bilinmeyen",
+                    "battery_level": 0,
+                    "position": {"x": 0, "y": 0, "heading": 0},
+                    "mission_progress": 0
+                },
+                "sensors": {
+                    "gps": {"latitude": 0, "longitude": 0, "satellites": 0},
+                    "imu": {"roll": 0, "pitch": 0, "yaw": 0},
+                    "battery": {"voltage": 0, "current": 0, "level": 0},
+                    "obstacles": []
+                },
+                "motors": {
+                    "left_speed": 0,
+                    "right_speed": 0,
+                    "brushes_active": False,
+                    "fan_active": False
+                }
             }
 
-        return web_verisi
+            # Robot durum bilgisi
+            if "durum_bilgisi" in robot_verisi:
+                durum_bilgisi = robot_verisi["durum_bilgisi"]
+                web_verisi["robot_status"]["state"] = durum_bilgisi.get("durum", "bilinmeyen")
 
-    except Exception as e:
-        logging.getLogger("WebArayuz").error(f"❌ Web data çevirme hatası: {e}")
-        return {
-            "timestamp": datetime.now().isoformat(),
-            "error": "Veri çevirme hatası"
-        }
+            # Sensor verileri - yeni format
+            if "sensor_data" in robot_verisi:
+                sensor_verisi = robot_verisi["sensor_data"]
+
+                # GPS - yeni format
+                if "gps" in sensor_verisi:
+                    gps_verisi = sensor_verisi["gps"]
+                    web_verisi["sensors"]["gps"] = {
+                        "latitude": gps_verisi.get("latitude", 0),
+                        "longitude": gps_verisi.get("longitude", 0),
+                        "satellites": gps_verisi.get("satellites", 0),
+                        "fix_quality": gps_verisi.get("fix_quality", 0)
+                    }
+
+                # IMU - yeni format
+                if "imu" in sensor_verisi:
+                    imu_verisi = sensor_verisi["imu"]
+                    web_verisi["sensors"]["imu"] = {
+                        "roll": imu_verisi.get("roll", 0),
+                        "pitch": imu_verisi.get("pitch", 0),
+                        "yaw": imu_verisi.get("yaw", 0),
+                        "temperature": imu_verisi.get("temperature", 0)
+                    }
+
+                # Batarya - yeni format (battery key'i kullan)
+                if "battery" in sensor_verisi:
+                    batarya_verisi = sensor_verisi["battery"]
+                    web_verisi["sensors"]["battery"] = {
+                        "voltage": batarya_verisi.get("voltage", 0),
+                        "current": batarya_verisi.get("current", 0),
+                        "level": batarya_verisi.get("percentage", batarya_verisi.get("level", 0)),
+                        "power": batarya_verisi.get("power", 0)
+                    }
+                    web_verisi["robot_status"]["battery_level"] = batarya_verisi.get(
+                        "percentage", batarya_verisi.get("level", 0))
+
+                # Eski format desteği - batarya
+                elif "batarya" in sensor_verisi and sensor_verisi["batarya"]:
+                    batarya_verisi = sensor_verisi["batarya"]
+                    web_verisi["sensors"]["battery"] = {
+                        "voltage": batarya_verisi.get("voltage", 0),
+                        "current": batarya_verisi.get("current", 0),
+                        "level": batarya_verisi.get("level", 0),
+                        "power": batarya_verisi.get("power", 0)
+                    }
+                    web_verisi["robot_status"]["battery_level"] = batarya_verisi.get("level", 0)
+
+            # Konum bilgisi
+            if "konum_bilgisi" in robot_verisi:
+                konum = robot_verisi["konum_bilgisi"]
+                # Konum objesi dataclass ise attribute'lara doğrudan eriş
+                if hasattr(konum, 'x'):
+                    web_verisi["robot_status"]["position"] = {
+                        "x": getattr(konum, 'x', 0),
+                        "y": getattr(konum, 'y', 0),
+                        "heading": getattr(konum, 'theta', 0)
+                    }
+                # Konum dict ise normal erişim
+                elif isinstance(konum, dict):
+                    web_verisi["robot_status"]["position"] = {
+                        "x": konum.get("x", 0),
+                        "y": konum.get("y", 0),
+                        "heading": konum.get("theta", 0)
+                    }
+                else:
+                    web_verisi["robot_status"]["position"] = {
+                        "x": 0,
+                        "y": 0,
+                        "heading": 0
+                    }
+
+                # Position bilgisini top-level'a da koy (API backward compatibility için)
+                web_verisi["position"] = web_verisi["robot_status"]["position"]
+
+            # Motor durumu
+            if "motor_durumu" in robot_verisi:
+                motor_verisi = robot_verisi["motor_durumu"]
+                web_verisi["motors"] = {
+                    "left_speed": motor_verisi.get("hizlar", {}).get("sol", 0),
+                    "right_speed": motor_verisi.get("hizlar", {}).get("sag", 0),
+                    "brushes_active": any(motor_verisi.get("fircalar", {}).values()),
+                    "fan_active": motor_verisi.get("fan", False)
+                }
+
+            # Hareket istatistikleri
+            if "hareket_istatistikleri" in robot_verisi:
+                istatistikler = robot_verisi["hareket_istatistikleri"]
+                web_verisi["mission_stats"] = {
+                    "total_distance": istatistikler.get("toplam_mesafe", 0),
+                    "working_time": istatistikler.get("hareket_sayisi", 0) * 0.1 / 60,  # Yaklaşık çalışma süresi (dakika)
+                    "average_speed": istatistikler.get("ortalama_hiz", 0),
+                    "max_speed": istatistikler.get("max_hiz", 0)
+                }
+
+            return web_verisi
+
+        except Exception as e:
+            logging.getLogger("WebArayuz").error(f"❌ Web data çevirme hatası: {e}")
+            return {
+                "timestamp": datetime.now().isoformat(),
+                "error": "Veri çevirme hatası"
+            }

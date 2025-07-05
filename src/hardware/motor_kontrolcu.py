@@ -236,6 +236,12 @@ class MotorKontrolcu:
         self.logger.debug(f"🚶 Hareket: linear={hareket.linear_hiz:.2f}m/s, angular={hareket.angular_hiz:.2f}rad/s")
         self.logger.debug(f"⚙️ Tekerlek hızları: sol={sol_hiz:.2f}, sag={sag_hiz:.2f}")
 
+        # Mevcut hızları güncelle - robot durumu takibi için
+        self.mevcut_hizlar["linear"] = hareket.linear_hiz
+        self.mevcut_hizlar["angular"] = hareket.angular_hiz
+        self.mevcut_hizlar["sol"] = sol_hiz
+        self.mevcut_hizlar["sag"] = sag_hiz
+
         # Motor hızlarını uygula
         await self._tekerlek_hizlarini_ayarla(sol_hiz, sag_hiz)
 
@@ -394,6 +400,12 @@ class MotorKontrolcu:
         await self.fircalari_calistir(False)
         await self.fan_calistir(False)
 
+        # Mevcut hızları sıfırla
+        self.mevcut_hizlar["linear"] = 0.0
+        self.mevcut_hizlar["angular"] = 0.0
+        self.mevcut_hizlar["sol"] = 0.0
+        self.mevcut_hizlar["sag"] = 0.0
+
         self.motorlar_aktif = False
         self.logger.info("✅ Tüm motorlar durduruldu")
 
@@ -466,6 +478,15 @@ class MotorKontrolcu:
         """Enkoder sayaçlarını sıfırla"""
         self.enkoder_sayaclari = {"sol": 0, "sag": 0}
         self.logger.info("🔄 Enkoder sayaçları sıfırlandı")
+
+    def get_current_speeds(self) -> Dict[str, float]:
+        """🏃 Mevcut hızları al - robot durumu için"""
+        return {
+            "linear": self.mevcut_hizlar.get("linear", 0.0),
+            "angular": self.mevcut_hizlar.get("angular", 0.0),
+            "left_wheel": self.mevcut_hizlar.get("sol", 0.0),
+            "right_wheel": self.mevcut_hizlar.get("sag", 0.0)
+        }
 
     def get_motor_durumu(self) -> Dict[str, Any]:
         """Motor durumu bilgisi"""
