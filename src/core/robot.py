@@ -269,7 +269,7 @@ class BahceRobotu:
             return {
                 "timestamp": datetime.now().isoformat(),
                 "battery": {"voltage": 12.5, "current": 1.2, "percentage": 85},
-                "sensors": {"ultrasonic": {"distance": 50.0}, "bump": False},
+                "sensors": {"bump": False},
                 "imu": {"roll": 0.0, "pitch": 0.0, "yaw": 0.0},
                 "gps": {"latitude": 39.9334, "longitude": 32.8597, "fix": False}
             }

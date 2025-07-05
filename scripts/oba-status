@@ -337,7 +337,7 @@ check_sensors_status() {
     else
         check_file_age "logs/sensors.log" 10 "Sensör verisi"
         check_file_age "logs/imu.log" 15 "IMU verisi"
-        check_file_age "logs/ultrasonic.log" 20 "Ultrasonik verisi"
+        # Ultrasonik sensörler devre dışı
     fi
 
     echo ""

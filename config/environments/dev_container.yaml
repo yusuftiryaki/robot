@@ -29,21 +29,6 @@ motors:
 sensors:
   mock_enabled: true
   simulation_sensors:
-    - type: "ultrasonic"
-      name: "front"
-      min_range: 0.02 # 2cm
-      max_range: 4.0 # 4m
-      field_of_view: 15 # degrees
-    - type: "ultrasonic"
-      name: "left"
-      min_range: 0.02
-      max_range: 4.0
-      field_of_view: 15
-    - type: "ultrasonic"
-      name: "right"
-      min_range: 0.02
-      max_range: 4.0
-      field_of_view: 15
     - type: "imu"
       name: "main_imu"
       update_rate: 100 # Hz

@@ -57,15 +57,6 @@ class PowerData:
     level: float  # batarya seviyesi %
 
 
-@dataclass
-class UltrasonikData:
-    """Ultrasonik sensör verisi"""
-    front: float
-    left: float
-    right: float
-    back: float
-
-
 class SensorOkuyucu:
     """
     📡 Ana Sensör Okuyucu Sınıfı
@@ -138,14 +129,7 @@ class SensorOkuyucu:
                 sensor_type = sensor.get('type', '')
                 sensor_name = sensor.get('name', '')
 
-                if sensor_type == 'ultrasonic':
-                    # Ultrasonik sensör config'ini al
-                    parsed_data[f'ultrasonic_{sensor_name}'] = {
-                        'min_range': sensor.get('min_range', 0.02),
-                        'max_range': sensor.get('max_range', 4.0),
-                        'field_of_view': sensor.get('field_of_view', 15)
-                    }
-                elif sensor_type == 'imu':
+                if sensor_type == 'imu':
                     # IMU sensör config'ini al
                     parsed_data['imu_config'] = {
                         'update_rate': sensor.get('update_rate', 100),
@@ -290,8 +274,7 @@ class SensorOkuyucu:
             self.imu_oku(),
             self.gps_oku(),
             self.batarya_oku(),
-            self.tampon_oku(),
-            self.ultrasonik_oku()
+            self.tampon_oku()
         ]
 
         results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -302,8 +285,7 @@ class SensorOkuyucu:
             "imu": results[0] if not isinstance(results[0], Exception) else None,
             "gps": results[1] if not isinstance(results[1], Exception) else None,
             "batarya": results[2] if not isinstance(results[2], Exception) else None,
-            "tampon": results[3] if not isinstance(results[3], Exception) else None,
-            "ultrasonik": results[4] if not isinstance(results[4], Exception) else None
+            "tampon": results[3] if not isinstance(results[3], Exception) else None
         }
 
         # Hataları logla
@@ -530,148 +512,6 @@ class SensorOkuyucu:
         except Exception as e:
             self.logger.error(f"❌ Tampon okuma hatası: {e}")
             return {"front_bumper": False}
-
-    async def ultrasonik_oku(self) -> Optional[Dict[str, Any]]:
-        """📏 Ultrasonik sensörlerden mesafe oku"""
-        try:
-            if self.simulation_mode:
-                return await self._simulation_ultrasonik_oku()
-            else:
-                return await self._real_ultrasonik_oku()
-        except Exception as e:
-            self.logger.error(f"❌ Ultrasonik okuma hatası: {e}")
-            return None
-
-    async def _simulation_ultrasonik_oku(self) -> Dict[str, Any]:
-        """Simülasyon ultrasonik verisi - Config'den alınan değerlerle"""
-        t = time.time() - self.simulation_time_start
-
-        # Config'ten sensör ayarlarını al
-        front_config = self.simulation_data.get('ultrasonic_front', {})
-        left_config = self.simulation_data.get('ultrasonic_left', {})
-        right_config = self.simulation_data.get('ultrasonic_right', {})
-
-        # Varsayılan değerler
-        default_min = 0.02
-        default_max = 4.0
-
-        # Her sensör için dinamik mesafe hesapla
-        front_min = front_config.get('min_range', default_min)
-        front_max = front_config.get('max_range', default_max)
-        front_distance = front_min + (front_max - front_min) * (0.5 + 0.3 * math.sin(t * 0.3))
-
-        left_min = left_config.get('min_range', default_min)
-        left_max = left_config.get('max_range', default_max)
-        left_distance = left_min + (left_max - left_min) * (0.4 + 0.2 * math.cos(t * 0.4))
-
-        right_min = right_config.get('min_range', default_min)
-        right_max = right_config.get('max_range', default_max)
-        right_distance = right_min + (right_max - right_min) * (0.45 + 0.25 * math.sin(t * 0.2))
-
-        # Simülasyonda back sensörü yok config'de, varsayılan değerler kullan
-        back_distance = 3.0 + 0.2 * math.cos(t * 0.1)
-
-        ultrasonik_data = UltrasonikData(
-            front=front_distance,
-            left=left_distance,
-            right=right_distance,
-            back=back_distance
-        )
-
-        return asdict(ultrasonik_data)
-
-    async def _real_ultrasonik_oku(self) -> Dict[str, Any]:
-        """Gerçek ultrasonik verisi - Config'ten pin'leri al"""
-        try:
-            # Config'ten ultrasonik sensör ayarlarını al
-            distances = {}
-
-            # Config'ten ultrasonik sensör pin'lerini al
-            ultrasonic_sensors = self.config.get("ultrasonic_sensors", {})
-
-            # Varsayılan HC-SR04 sensör pin konfigürasyonu
-            default_pins = {
-                'front': {'trigger': 23, 'echo': 24},
-                'left': {'trigger': 25, 'echo': 8},
-                'right': {'trigger': 7, 'echo': 1},
-                'back': {'trigger': 12, 'echo': 16}
-            }
-
-            # Config'ten pin'leri al, yoksa varsayılan değerleri kullan
-            ultrasonic_config = {}
-            for position, default_config in default_pins.items():
-                sensor_config = ultrasonic_sensors.get(position, {})
-                ultrasonic_config[position] = {
-                    'trigger': sensor_config.get('trigger_pin', default_config['trigger']),
-                    'echo': sensor_config.get('echo_pin', default_config['echo'])
-                }
-
-            import RPi.GPIO as GPIO
-            import time
-
-            # Her sensör için mesafe ölç
-            for position, pins in ultrasonic_config.items():
-                try:
-                    trigger_pin = pins['trigger']
-                    echo_pin = pins['echo']
-
-                    # Pin'leri ayarla
-                    GPIO.setup(trigger_pin, GPIO.OUT)
-                    GPIO.setup(echo_pin, GPIO.IN)
-
-                    # Trigger sinyali gönder
-                    GPIO.output(trigger_pin, True)
-                    await asyncio.sleep(0.00001)  # 10 microsecond
-                    GPIO.output(trigger_pin, False)
-
-                    # Echo'yu bekle
-                    start_time = time.time()
-                    timeout = start_time + 0.1  # 100ms timeout
-
-                    # Echo yüksek olana kadar bekle
-                    while GPIO.input(echo_pin) == 0:
-                        start_time = time.time()
-                        if start_time > timeout:
-                            raise TimeoutError("Echo başlangıcı timeout")
-
-                    # Echo alçak olana kadar bekle
-                    while GPIO.input(echo_pin) == 1:
-                        stop_time = time.time()
-                        if stop_time > timeout:
-                            raise TimeoutError("Echo bitişi timeout")
-
-                    # Mesafe hesapla (ses hızı: 343 m/s)
-                    time_elapsed = stop_time - start_time
-                    distance = (time_elapsed * 343) / 2  # Gidip gelme mesafesi
-
-                    # Mesafe sınırları (2cm - 400cm)
-                    if distance < 0.02:
-                        distance = 0.02
-                    elif distance > 4.0:
-                        distance = 4.0
-
-                    distances[position] = distance
-
-                    self.logger.debug(f"📏 {position} ultrasonik: {distance:.2f}m (Trigger:{trigger_pin}, Echo:{echo_pin})")
-
-                except Exception as e:
-                    self.logger.warning(f"⚠️ {position} ultrasonik sensör hatası: {e}")
-                    # Hata durumunda max mesafe kullan
-                    distances[position] = 4.0
-
-            ultrasonik_data = UltrasonikData(
-                front=distances.get('front', 4.0),
-                left=distances.get('left', 4.0),
-                right=distances.get('right', 4.0),
-                back=distances.get('back', 4.0)
-            )
-
-            return asdict(ultrasonik_data)
-
-        except Exception as e:
-            self.logger.error(f"❌ Ultrasonik okuma hatası: {e}")
-            # Hata durumunda simülasyon verisi dön
-            return await self._simulation_ultrasonik_oku()
 
     async def kalibrasyon_yap(self):
         """🎯 Sensör kalibrasyonu yap"""

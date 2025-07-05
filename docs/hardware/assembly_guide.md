@@ -69,7 +69,7 @@
 
 #### 1.2 Mevcut Motorları Analiz Et
 - **Sol Motor**: Orijinal Mi Vacuum motoru kullanılacak
-- **Sağ Motor**: Orijinal Mi Vacuum motoru kullanılacak  
+- **Sağ Motor**: Orijinal Mi Vacuum motoru kullanılacak
 - **Fırça Motor**: Mevcut fırça sistemi adapte edilecek
 - **Fan Motor**: Emme fanı mevcut sistem kullanılacak
 
@@ -225,53 +225,26 @@ for i in range(10):
 "
 ```
 
-#### 4.3 Ultrasonik Sensörler (HC-SR04)
-**Montaj Düzeni**:
+#### 4.3 Kamera (Pi Camera V2)
+**Montaj Pozisyonu**: Robot ön kısmında, temiz görüş alanı
 ```
-    [US2]     [US1]     [US3]
-      \        |        /
-       \       |       /
-        \    [ROBOT]  /
-         \     |     /
-          \    |    /
-         [US4] | [US5]
-               |
-            [US6]
+      📷
+   ┌─[CAM]─┐
+   │ Pi V2 │  ← Lens temiz, 45° aşağı açı
+   │       │
+   └───────┘
 ```
 
-**Her sensör için test:**
-```python
-# Ultrasonik test script
-import RPi.GPIO as GPIO
-import time
+**Bağlantı Test:**
+```bash
+# Kamera testi
+raspistill -o test.jpg -t 1000
+# test.jpg dosyası oluşmalı
 
-def test_ultrasonic(trig_pin, echo_pin):
-    GPIO.setmode(GPIO.BCM)
-    GPIO.setup(trig_pin, GPIO.OUT)
-    GPIO.setup(echo_pin, GPIO.IN)
-    
-    GPIO.output(trig_pin, GPIO.LOW)
-    time.sleep(0.1)
-    
-    GPIO.output(trig_pin, GPIO.HIGH)
-    time.sleep(0.00001)
-    GPIO.output(trig_pin, GPIO.LOW)
-    
-    while GPIO.input(echo_pin) == 0:
-        pulse_start = time.time()
-    
-    while GPIO.input(echo_pin) == 1:
-        pulse_end = time.time()
-    
-    distance = (pulse_end - pulse_start) * 17150
-    GPIO.cleanup()
-    return round(distance, 2)
-
-# Test et
-print("Mesafe:", test_ultrasonic(19, 16), "cm")
+# Video stream test
+raspivid -t 10000 -w 640 -h 480 -fps 30 -o test.h264
+"
 ```
-
-#### 4.4 Kamera (Pi Camera V2)
 **Montaj Pozisyonu**: Ön kısımda, temiz görüş alanı
 ```
      ┌─[CAMERA]─┐
@@ -286,7 +259,7 @@ print("Mesafe:", test_ultrasonic(19, 16), "cm")
 raspistill -o test_image.jpg
 ls -la test_image.jpg
 
-# Video stream testi  
+# Video stream testi
 raspivid -t 5000 -o test_video.h264
 ```
 
@@ -315,7 +288,7 @@ import time
 ENA = 17    # Sol motor PWM
 IN1 = 18    # Sol motor direction 1
 IN2 = 24    # Sol motor direction 2
-ENB = 27    # Sağ motor PWM  
+ENB = 27    # Sağ motor PWM
 IN3 = 22    # Sağ motor direction 1
 IN4 = 23    # Sağ motor direction 2
 
@@ -337,12 +310,12 @@ def motor_test():
     left_pwm.ChangeDutyCycle(50)
     right_pwm.ChangeDutyCycle(50)
     time.sleep(2)
-    
+
     print("Dur...")
     left_pwm.ChangeDutyCycle(0)
     right_pwm.ChangeDutyCycle(0)
     time.sleep(1)
-    
+
     print("Geri hareket...")
     GPIO.output(IN1, GPIO.LOW)
     GPIO.output(IN2, GPIO.HIGH)
@@ -351,7 +324,7 @@ def motor_test():
     left_pwm.ChangeDutyCycle(50)
     right_pwm.ChangeDutyCycle(50)
     time.sleep(2)
-    
+
     # Temizle
     left_pwm.stop()
     right_pwm.stop()
@@ -380,7 +353,7 @@ import RPi.GPIO as GPIO
 # Tampon pin tanımları
 BUMPER_PINS = {
     'front_left': 5,
-    'front_right': 6, 
+    'front_right': 6,
     'left': 12,
     'right': 13
 }
@@ -437,7 +410,7 @@ asyncio.run(calibrate())
 # 1. Acil Stop Testi
 echo "Acil stop butonunu test et"
 
-# 2. Tampon Sensör Testi  
+# 2. Tampon Sensör Testi
 echo "Her tamponu manuel olarak bas"
 
 # 3. Eğim Sensör Testi
@@ -461,8 +434,8 @@ echo "Ultrasonik sensörler önüne engel koy"
 ### Sensör Performansı
 - **GPS hassasiyeti**: ±2-3 metre
 - **IMU çözünürlüğü**: 0.1° açısal
-- **Ultrasonik menzil**: 2cm - 4m
 - **Kamera çözünürlüğü**: 1920x1080 @ 30fps
+- **Engel tespiti**: Kamera tabanlı computer vision
 
 ### Sistemik Performans
 - **Boot zamanı**: ~30 saniye
@@ -493,7 +466,7 @@ tail -f /var/log/syslog
 
 #### 3. Motorlar Hareket Etmiyor
 - L298N power LED kontrolü
-- Motor bağlantı kontrolü  
+- Motor bağlantı kontrolü
 - PWM sinyal kontrolü
 
 #### 4. GPS Sinyal Almıyor

@@ -28,7 +28,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 # Test modüllerini import et
 try:
     from test_hardware import donanim_testlerini_calistir
-    HARDWARE_AVAILABLE = False  # Geçici olarak kapatıldı - API uyumsuzluğu
+    HARDWARE_AVAILABLE = True  # Donanım testleri artık çalışıyor
 except ImportError:
     HARDWARE_AVAILABLE = False
     print("⚠️ Donanım testleri kullanılamıyor (hardware modülleri bulunamadı)")

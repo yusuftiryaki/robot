@@ -42,21 +42,6 @@ motors:
 sensors:
   mock_enabled: false
 
-  # Ultrasonik sensörler
-  ultrasonic:
-    - name: "front"
-      trigger_pin: 24
-      echo_pin: 25
-      max_distance: 400 # cm
-    - name: "left"
-      trigger_pin: 22
-      echo_pin: 23
-      max_distance: 400
-    - name: "right"
-      trigger_pin: 26
-      echo_pin: 27
-      max_distance: 400
-
   # I2C sensörleri
   i2c:
     bus: 1
