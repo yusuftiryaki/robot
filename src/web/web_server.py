@@ -454,6 +454,10 @@ class WebArayuz:
             charging_station_info = self._sarj_istasyonu_bilgileri_al()
             web_verisi["charging_station"] = charging_station_info
 
+            # Bahçe sınır bilgilerini ekle
+            boundary_status = self._bahce_sinir_bilgileri_al()
+            web_verisi["boundary_status"] = boundary_status
+
             return web_verisi
 
         except Exception as e:
@@ -577,6 +581,83 @@ class WebArayuz:
         except Exception as e:
             self.logger.error(f"❌ Şarj istasyonu bilgisi alma hatası: {e}")
             return None
+
+    def _bahce_sinir_bilgileri_al(self) -> Optional[Dict[str, Any]]:
+        """🏡 Bahçe sınır bilgilerini al - artık sadece koordinasyon yapar"""
+        try:
+            # Bahçe sınır kontrol sistemi var mı kontrol et
+            if not hasattr(self.robot, 'bahce_sinir_kontrol') or not self.robot.bahce_sinir_kontrol:
+                return {
+                    "active": False,
+                    "distance_to_fence": None,
+                    "fence_violations": 0,
+                    "violation_rate": 0.0,
+                    "garden_area": 0.0,
+                    "status": "NOT_AVAILABLE",
+                    "buffer_distance": 3.0,
+                    "warning_distance": 5.0
+                }
+
+            # Konum takipçi var mı kontrol et
+            if not hasattr(self.robot, 'konum_takipci') or not self.robot.konum_takipci:
+                return {
+                    "active": False,
+                    "distance_to_fence": None,
+                    "fence_violations": 0,
+                    "violation_rate": 0.0,
+                    "garden_area": 0.0,
+                    "status": "NO_GPS",
+                    "buffer_distance": 3.0,
+                    "warning_distance": 5.0
+                }
+
+            # Mevcut GPS konumunu al
+            current_position = self.robot.konum_takipci.get_mevcut_konum()
+            if not current_position:
+                return {
+                    "active": False,
+                    "distance_to_fence": None,
+                    "fence_violations": 0,
+                    "violation_rate": 0.0,
+                    "garden_area": 0.0,
+                    "status": "NO_GPS_DATA",
+                    "buffer_distance": 3.0,
+                    "warning_distance": 5.0
+                }
+
+            # GPS koordinatlarını al
+            if hasattr(current_position, 'latitude') and hasattr(current_position, 'longitude'):
+                current_lat = current_position.latitude
+                current_lon = current_position.longitude
+            else:
+                return {
+                    "active": False,
+                    "distance_to_fence": None,
+                    "fence_violations": 0,
+                    "violation_rate": 0.0,
+                    "garden_area": 0.0,
+                    "status": "INVALID_GPS",
+                    "buffer_distance": 3.0,
+                    "warning_distance": 5.0
+                }
+
+            # Bahçe sınır kontrolüne sor - tüm hesaplama orada
+            return self.robot.bahce_sinir_kontrol.get_current_boundary_status_for_web(
+                current_lat, current_lon
+            )
+
+        except Exception as e:
+            self.logger.error(f"❌ Bahçe sınır bilgisi alma hatası: {e}")
+            return {
+                "active": False,
+                "distance_to_fence": None,
+                "fence_violations": 0,
+                "violation_rate": 0.0,
+                "garden_area": 0.0,
+                "status": "ERROR",
+                "buffer_distance": 3.0,
+                "warning_distance": 5.0
+            }
 
     def robot_data_guncelle(self, robot_data: Dict[str, Any]):
         """

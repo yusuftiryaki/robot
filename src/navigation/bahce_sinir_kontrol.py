@@ -339,3 +339,69 @@ class BahceSinirKontrol:
             "buffer_distance": self.buffer_distance,
             "warning_distance": self.warning_distance
         }
+
+    def get_current_boundary_status_for_web(self, current_lat: float, current_lon: float) -> Dict[str, Any]:
+        """
+        🌐 Web arayüzü için mevcut sınır durumunu al
+
+        Bu fonksiyon web server'ın ihtiyacı olan formatta sınır bilgilerini döndürür.
+        Tüm hesaplamalar burada yapılır, web server sadece formatlamakla uğraşır.
+
+        Args:
+            current_lat: Mevcut GPS latitude
+            current_lon: Mevcut GPS longitude
+
+        Returns:
+            Dict: Web API formatında sınır durumu
+        """
+        if not self.boundary_points:
+            return {
+                "active": False,
+                "distance_to_fence": None,
+                "fence_violations": 0,
+                "violation_rate": 0.0,
+                "garden_area": 0.0,
+                "status": "INACTIVE",
+                "buffer_distance": self.buffer_distance,
+                "warning_distance": self.warning_distance
+            }
+
+        try:
+            # Sınır kontrolü yap
+            kontrol_sonucu = self.robot_konumunu_kontrol_et(current_lat, current_lon)
+
+            # Uyarı seviyesini web formatına çevir
+            web_status = self._convert_uyari_to_web_status(kontrol_sonucu.uyari_seviyesi)
+
+            return {
+                "active": True,
+                "distance_to_fence": kontrol_sonucu.sinira_mesafe,
+                "fence_violations": self.sinir_ihlali_sayisi,
+                "violation_rate": (self.sinir_ihlali_sayisi / max(1, self.toplam_kontrol_sayisi)) * 100,
+                "garden_area": self.bahce_alani,
+                "status": web_status,
+                "buffer_distance": self.buffer_distance,
+                "warning_distance": self.warning_distance
+            }
+
+        except Exception as e:
+            self.logger.error(f"❌ Sınır durumu web formatı hatası: {e}")
+            return {
+                "active": False,
+                "distance_to_fence": None,
+                "fence_violations": self.sinir_ihlali_sayisi,
+                "violation_rate": 0.0,
+                "garden_area": self.bahce_alani,
+                "status": "ERROR",
+                "buffer_distance": self.buffer_distance,
+                "warning_distance": self.warning_distance
+            }
+
+    def _convert_uyari_to_web_status(self, uyari_seviyesi: str) -> str:
+        """Uyarı seviyesini web API formatına çevir"""
+        status_map = {
+            "güvenli": "SAFE",
+            "uyarı": "WARNING",
+            "tehlike": "DANGER"
+        }
+        return status_map.get(uyari_seviyesi, "UNKNOWN")

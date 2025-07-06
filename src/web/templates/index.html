@@ -979,21 +979,18 @@
                     }
                 }
 
-                // Bahçe sınır bilgileri güncellemesi
-                updateBoundaryStatus(data);
+                // Bahçe sınır bilgileri güncellemesi (status içinden)
+                if (data.boundary_status) {
+                    updateBoundaryStatusDirect(data.boundary_status, data.sensors);
+                } else {
+                    // Fallback: Eski yöntemle ayrı API çağrısı
+                    updateBoundaryStatus(data);
+                }
 
                 // Çalışma süresi ve mesafe
                 if (data.mission_stats) {
                     document.getElementById('total-distance').textContent = `${data.mission_stats.total_distance?.toFixed(1) || '--'} m`;
                     document.getElementById('working-time').textContent = `${data.mission_stats.working_time?.toFixed(1) || '--'} dk`;
-                }
-
-                // Bahçe sınır verileri
-                if (data.boundary_status) {
-                    document.getElementById('boundary-status').textContent = data.boundary_status.state || '--';
-                    document.getElementById('boundary-distance').textContent = `${data.boundary_status.distance_to_boundary?.toFixed(1) || '--'} m`;
-                    document.getElementById('boundary-area').textContent = `${data.boundary_status.garden_area?.toFixed(1) || '--'} m²`;
-                    document.getElementById('boundary-violations').textContent = data.boundary_status.violations || '--';
                 }
 
             } catch (error) {
@@ -1079,6 +1076,107 @@
             }
         }
 
+        // Sınır bilgilerini direkt status'tan güncelle (yeni yöntem)
+        function updateBoundaryStatusDirect(boundaryStatus, sensorData) {
+            try {
+                const statusElement = document.getElementById('boundary-status');
+                const distanceElement = document.getElementById('boundary-distance');
+                const areaElement = document.getElementById('boundary-area');
+                const violationsElement = document.getElementById('boundary-violations');
+
+                if (boundaryStatus.active) {
+                    // Durum güncelleme
+                    let statusText = 'Bilinmiyor';
+                    let statusColor = '#666';
+
+                    switch (boundaryStatus.status) {
+                        case 'SAFE':
+                            statusText = 'Güvenli';
+                            statusColor = '#4CAF50';
+                            break;
+                        case 'WARNING':
+                            statusText = 'Uyarı';
+                            statusColor = '#FF8C00';
+                            break;
+                        case 'DANGER':
+                            statusText = 'Tehlike';
+                            statusColor = '#DC143C';
+                            break;
+                        default:
+                            statusText = 'Bilinmiyor';
+                            statusColor = '#666';
+                    }
+
+                    statusElement.textContent = statusText;
+                    statusElement.style.color = statusColor;
+
+                    // Mesafe güncelleme
+                    const distance = boundaryStatus.distance_to_fence;
+                    if (distance !== null && distance !== undefined) {
+                        if (distance < 1.0) {
+                            distanceElement.textContent = `${(distance * 100).toFixed(0)} cm`;
+                            distanceElement.style.color = '#DC143C'; // Kırmızı
+                        } else if (distance < 3.0) {
+                            distanceElement.textContent = `${distance.toFixed(1)} m`;
+                            distanceElement.style.color = '#FF8C00'; // Turuncu
+                        } else {
+                            distanceElement.textContent = `${distance.toFixed(1)} m`;
+                            distanceElement.style.color = '#4CAF50'; // Yeşil
+                        }
+                    } else {
+                        distanceElement.textContent = '-- m';
+                        distanceElement.style.color = '#666';
+                    }
+
+                    // Diğer bilgiler
+                    areaElement.textContent = `${boundaryStatus.garden_area?.toFixed(1) || '--'} m²`;
+                    violationsElement.textContent = `${boundaryStatus.fence_violations }`;
+
+                    // İhlal oranına göre renk
+                    const violationRate = boundaryStatus.violation_rate || 0;
+                    if (violationRate > 10) {
+                        violationsElement.style.color = '#DC143C'; // Kırmızı
+                    } else if (violationRate > 5) {
+                        violationsElement.style.color = '#FF8C00'; // Turuncu
+                    } else {
+                        violationsElement.style.color = '#4CAF50'; // Yeşil
+                    }
+
+                } else {
+                    // Sınır sistemi pasif
+                    statusElement.textContent = 'Pasif';
+                    statusElement.style.color = '#666';
+                    distanceElement.textContent = '-- m';
+                    distanceElement.style.color = '#666';
+                    areaElement.textContent = '-- m²';
+                    violationsElement.textContent = '--';
+                }
+
+                addLog(`🏡 Sınır durumu: ${statusElement.textContent}, Mesafe: ${distanceElement.textContent}`);
+
+            } catch (error) {
+                console.error('Sınır bilgisi direkt güncelleme hatası:', error);
+                // Hata durumunda fallback'e git
+                updateBoundaryStatus({ sensors: sensorData });
+            }
+        }
+
+        // GPS mesafe hesaplama fonksiyonu
+        function calculateGPSDistance(lat1, lon1, lat2, lon2) {
+            const R = 6371000; // Dünya yarıçapı (metre)
+            const φ1 = lat1 * Math.PI / 180; // φ, λ radyan cinsinden
+            const φ2 = lat2 * Math.PI / 180;
+            const Δφ = (lat2 - lat1) * Math.PI / 180;
+            const Δλ = (lon2 - lon1) * Math.PI / 180;
+
+            const a = Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
+                Math.cos(φ1) * Math.cos(φ2) *
+                Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+            return R * c; // metre cinsinden mesafe
+        }
+
         // Bahçe sınır durumu güncelleme
         function updateBoundaryStatus(data) {
             // Bahçe sınır bilgilerini güncellemek için ayrı API çağrısı
@@ -1119,8 +1217,40 @@
                         statusElement.textContent = status;
                         statusElement.style.color = statusColor;
 
+                        // Sınıra mesafe hesapla (GPS varsa)
+                        let distanceToFence = '-- m';
+                        if (data.sensors && data.sensors.gps && data.sensors.gps.latitude && data.sensors.gps.longitude) {
+                            // Mevcut GPS koordinatları
+                            const currentLat = data.sensors.gps.latitude;
+                            const currentLon = data.sensors.gps.longitude;
+
+                            // Bahçe sınır noktalarına en yakın mesafeyi hesapla
+                            let minDistance = null;
+                            if (boundaryData.sinir_noktalari && boundaryData.sinir_noktalari.length > 0) {
+                                boundaryData.sinir_noktalari.forEach(point => {
+                                    const distance = calculateGPSDistance(currentLat, currentLon, point.lat, point.lon);
+                                    if (minDistance === null || distance < minDistance) {
+                                        minDistance = distance;
+                                    }
+                                });
+
+                                if (minDistance !== null) {
+                                    if (minDistance < 1.0) {
+                                        distanceToFence = `${(minDistance * 100).toFixed(0)} cm`;
+                                        distanceElement.style.color = '#DC143C'; // Kırmızı - çok yakın
+                                    } else if (minDistance < 3.0) {
+                                        distanceToFence = `${minDistance.toFixed(1)} m`;
+                                        distanceElement.style.color = '#FF8C00'; // Turuncu - yakın
+                                    } else {
+                                        distanceToFence = `${minDistance.toFixed(1)} m`;
+                                        distanceElement.style.color = '#4CAF50'; // Yeşil - güvenli
+                                    }
+                                }
+                            }
+                        }
+
                         // Diğer bilgileri güncelle
-                        distanceElement.textContent = '-- m'; // Gerçek zamanlı mesafe şu an için yok
+                        distanceElement.textContent = distanceToFence;
                         areaElement.textContent = `${stats.bahce_alani.toFixed(1)} m²`;
                         violationsElement.textContent = `${stats.sinir_ihlali}`;
 
