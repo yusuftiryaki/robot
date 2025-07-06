@@ -345,6 +345,216 @@
             transform: translateX(26px);
         }
 
+        /* Robot Pusulası Stilleri */
+        .compass-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 20px;
+        }
+
+        .compass {
+            width: 250px;
+            height: 200px;
+            position: relative;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 20px;
+        }
+
+        .compass-frame {
+            width: 150px;
+            height: 150px;
+            position: relative;
+            background: radial-gradient(circle, #f0f8f0 0%, #e8f5e8 100%);
+            border: 3px solid var(--primary-color);
+            border-radius: 50%;
+            box-shadow: inset 0 0 20px rgba(46, 139, 87, 0.2);
+        }
+
+        .compass-direction {
+            position: absolute;
+            font-weight: bold;
+            font-size: 1.2rem;
+            color: var(--primary-color);
+            user-select: none;
+        }
+
+        .compass-direction.north {
+            top: 5px;
+            left: 50%;
+            transform: translateX(-50%);
+        }
+
+        .compass-direction.east {
+            right: 5px;
+            top: 50%;
+            transform: translateY(-50%);
+        }
+
+        .compass-direction.south {
+            bottom: 5px;
+            left: 50%;
+            transform: translateX(-50%);
+        }
+
+        .compass-direction.west {
+            left: 5px;
+            top: 50%;
+            transform: translateY(-50%);
+        }
+
+        .compass-needle {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 4px;
+            height: 80px;
+            transform-origin: center;
+            transition: transform 0.3s ease;
+        }
+
+        .needle-north {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 4px;
+            height: 40px;
+            background: linear-gradient(to bottom, #FF0000, #CC0000);
+            clip-path: polygon(50% 0%, 0% 100%, 100% 100%);
+        }
+
+        .needle-south {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            width: 4px;
+            height: 40px;
+            background: linear-gradient(to top, #666666, #333333);
+            clip-path: polygon(0% 0%, 100% 0%, 50% 100%);
+        }
+
+        .robot-indicator {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 20px;
+            height: 24px;
+            transition: transform 0.3s ease;
+        }
+
+        .robot-body {
+            width: 100%;
+            height: 100%;
+            background: var(--primary-color);
+            border-radius: 3px;
+            position: relative;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+        }
+
+        .robot-front {
+            position: absolute;
+            top: 2px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 8px;
+            height: 2px;
+            background: #FFD700;
+            border-radius: 1px;
+        }
+
+        /* Eğim Göstergesi */
+        .tilt-indicator {
+            width: 80px;
+            height: 80px;
+            position: relative;
+            background: radial-gradient(circle, #87CEEB 0%, #4682B4 100%);
+            border: 2px solid var(--primary-color);
+            border-radius: 50%;
+            overflow: hidden;
+            box-shadow: inset 0 0 10px rgba(0, 0, 0, 0.2);
+        }
+
+        .horizon-line {
+            position: absolute;
+            top: 50%;
+            left: 0;
+            width: 100%;
+            height: 50%;
+            background: linear-gradient(to bottom, #8B4513 0%, #A0522D 100%);
+            transform-origin: center top;
+            transition: transform 0.3s ease;
+        }
+
+        .aircraft-symbol {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 40px;
+            height: 2px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transform-origin: center;
+            transition: transform 0.3s ease;
+        }
+
+        .aircraft-wing {
+            width: 15px;
+            height: 2px;
+            background: #000;
+            border-radius: 1px;
+        }
+
+        .aircraft-center {
+            width: 10px;
+            height: 2px;
+            background: #000;
+            border-radius: 1px;
+            margin: 0 2px;
+        }
+
+        .aircraft-wing.left {
+            transform: rotate(-10deg);
+        }
+
+        .aircraft-wing.right {
+            transform: rotate(10deg);
+        }
+
+        /* IMU Değerleri */
+        .imu-values {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            min-width: 120px;
+        }
+
+        .imu-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 12px;
+            background: var(--light-color);
+            border-radius: 6px;
+            font-size: 0.9rem;
+        }
+
+        .imu-label {
+            font-weight: bold;
+            color: var(--dark-color);
+        }
+
+        .imu-value {
+            font-weight: bold;
+            color: var(--primary-color);
+            font-family: 'Courier New', monospace;
+        }
+
         @media (max-width: 768px) {
             .container {
                 padding: 10px;
@@ -360,6 +570,36 @@
 
             .control-grid {
                 grid-template-columns: repeat(2, 1fr);
+            }
+
+            /* Mobile pusula düzenlemesi */
+            .compass {
+                width: 100%;
+                height: 180px;
+                flex-direction: column;
+                gap: 15px;
+            }
+
+            .compass-frame {
+                width: 120px;
+                height: 120px;
+            }
+
+            .tilt-indicator {
+                width: 60px;
+                height: 60px;
+            }
+
+            .imu-values {
+                flex-direction: row;
+                justify-content: space-between;
+                width: 100%;
+            }
+
+            .imu-row {
+                flex-direction: column;
+                text-align: center;
+                min-width: 80px;
             }
         }
     </style>
@@ -519,39 +759,100 @@
             </div>
         </div>
 
-        <!-- Sensör Verileri -->
-        <div class="card">
-            <div class="card-header">
-                📡 Sensör Verileri
+        <!-- Robot Pusulası ve Sensör Verileri -->
+        <div class="grid">
+            <!-- Robot Pusulası -->
+            <div class="card">
+                <div class="card-header">
+                    🧭 Robot Pusulası
+                </div>
+                <div class="compass-container">
+                    <div class="compass" id="compass">
+                        <!-- Pusula çerçevesi -->
+                        <div class="compass-frame">
+                            <!-- Yön işaretleri -->
+                            <div class="compass-direction north">K</div>
+                            <div class="compass-direction east">D</div>
+                            <div class="compass-direction south">G</div>
+                            <div class="compass-direction west">B</div>
+
+                            <!-- Pusula ibresi -->
+                            <div class="compass-needle" id="compass-needle">
+                                <div class="needle-north"></div>
+                                <div class="needle-south"></div>
+                            </div>
+
+                            <!-- Robot simgesi -->
+                            <div class="robot-indicator" id="robot-indicator">
+                                <div class="robot-body">
+                                    <div class="robot-front"></div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Eğim göstergesi -->
+                        <div class="tilt-indicator">
+                            <div class="horizon-line" id="horizon-line"></div>
+                            <div class="aircraft-symbol">
+                                <div class="aircraft-wing left"></div>
+                                <div class="aircraft-center"></div>
+                                <div class="aircraft-wing right"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- IMU Değerleri -->
+                    <div class="imu-values">
+                        <div class="imu-row">
+                            <span class="imu-label">Roll:</span>
+                            <span class="imu-value" id="compass-roll">--°</span>
+                        </div>
+                        <div class="imu-row">
+                            <span class="imu-label">Pitch:</span>
+                            <span class="imu-value" id="compass-pitch">--°</span>
+                        </div>
+                        <div class="imu-row">
+                            <span class="imu-label">Yaw:</span>
+                            <span class="imu-value" id="compass-yaw">--°</span>
+                        </div>
+                    </div>
+                </div>
             </div>
-            <div class="status-grid">
-                <div class="status-item">
-                    <div class="status-value" id="gps-lat">--°</div>
-                    <div class="status-label">Enlem</div>
+
+            <!-- Sensör Verileri -->
+            <div class="card">
+                <div class="card-header">
+                    📡 Sensör Verileri
                 </div>
-                <div class="status-item">
-                    <div class="status-value" id="gps-lon">--°</div>
-                    <div class="status-label">Boylam</div>
-                </div>
-                <div class="status-item">
-                    <div class="status-value" id="imu-roll">--°</div>
-                    <div class="status-label">Roll</div>
-                </div>
-                <div class="status-item">
-                    <div class="status-value" id="imu-pitch">--°</div>
-                    <div class="status-label">Pitch</div>
-                </div>
-                <div class="status-item">
-                    <div class="status-value" id="imu-yaw">--°</div>
-                    <div class="status-label">Yaw</div>
-                </div>
-                <div class="status-item">
-                    <div class="status-value" id="battery-voltage">-- V</div>
-                    <div class="status-label">Voltaj</div>
-                </div>
-                <div class="status-item">
-                    <div class="status-value" id="battery-current">-- A</div>
-                    <div class="status-label">Akım</div>
+                <div class="status-grid">
+                    <div class="status-item">
+                        <div class="status-value" id="gps-lat">--°</div>
+                        <div class="status-label">Enlem</div>
+                    </div>
+                    <div class="status-item">
+                        <div class="status-value" id="gps-lon">--°</div>
+                        <div class="status-label">Boylam</div>
+                    </div>
+                    <div class="status-item">
+                        <div class="status-value" id="imu-roll">--°</div>
+                        <div class="status-label">Roll</div>
+                    </div>
+                    <div class="status-item">
+                        <div class="status-value" id="imu-pitch">--°</div>
+                        <div class="status-label">Pitch</div>
+                    </div>
+                    <div class="status-item">
+                        <div class="status-value" id="imu-yaw">--°</div>
+                        <div class="status-label">Yaw</div>
+                    </div>
+                    <div class="status-item">
+                        <div class="status-value" id="battery-voltage">-- V</div>
+                        <div class="status-label">Voltaj</div>
+                    </div>
+                    <div class="status-item">
+                        <div class="status-value" id="battery-current">-- A</div>
+                        <div class="status-label">Akım</div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -640,9 +941,16 @@
 
                 // IMU verileri
                 if (data.sensors && data.sensors.imu) {
-                    document.getElementById('imu-roll').textContent = `${data.sensors.imu.roll?.toFixed(2) || '--'}°`;
-                    document.getElementById('imu-pitch').textContent = `${data.sensors.imu.pitch?.toFixed(2) || '--'}°`;
-                    document.getElementById('imu-yaw').textContent = `${data.sensors.imu.yaw?.toFixed(2) || '--'}°`;
+                    const roll = data.sensors.imu.roll || 0;
+                    const pitch = data.sensors.imu.pitch || 0;
+                    const yaw = data.sensors.imu.yaw || 0;
+
+                    document.getElementById('imu-roll').textContent = `${roll.toFixed(2)}°`;
+                    document.getElementById('imu-pitch').textContent = `${pitch.toFixed(2)}°`;
+                    document.getElementById('imu-yaw').textContent = `${yaw.toFixed(2)}°`;
+
+                    // Pusulayı güncelle
+                    updateCompass(roll, pitch, yaw);
                 }
 
                 // Batarya detay verileri
@@ -690,6 +998,84 @@
 
             } catch (error) {
                 console.error('Robot status güncelleme hatası:', error);
+            }
+        }
+
+        // Pusula güncelleme fonksiyonu
+        function updateCompass(roll, pitch, yaw) {
+            try {
+                // Pusula değerlerini güncelle
+                document.getElementById('compass-roll').textContent = `${roll.toFixed(1)}°`;
+                document.getElementById('compass-pitch').textContent = `${pitch.toFixed(1)}°`;
+                document.getElementById('compass-yaw').textContent = `${yaw.toFixed(1)}°`;
+
+                // Pusula ibresi (Yaw - kuzey yönü)
+                const compassNeedle = document.getElementById('compass-needle');
+                if (compassNeedle) {
+                    // Yaw değerini pusula rotasyonuna çevir (0° = Kuzey)
+                    const compassRotation = -yaw; // Negatif çünkü saat yönünün tersine
+                    compassNeedle.style.transform = `translate(-50%, -50%) rotate(${compassRotation}deg)`;
+                }
+
+                // Robot göstergesi (Roll ve Pitch kombinasyonu)
+                const robotIndicator = document.getElementById('robot-indicator');
+                if (robotIndicator) {
+                    // Roll ve Pitch'e göre robot eğimi
+                    const robotTransform = `translate(-50%, -50%) rotateX(${pitch}deg) rotateZ(${roll}deg)`;
+                    robotIndicator.style.transform = robotTransform;
+                }
+
+                // Eğim göstergesi (Pitch ve Roll)
+                const horizonLine = document.getElementById('horizon-line');
+                if (horizonLine) {
+                    // Pitch için dikey hareket, Roll için yatay eğim
+                    const pitchOffset = pitch * 0.8; // Pitch etkisini azalt
+                    const rollRotation = -roll; // Roll eğimi
+
+                    horizonLine.style.transform = `translateY(${pitchOffset}px) rotate(${rollRotation}deg)`;
+                }
+
+                // Uçak simgesi (Roll eğimi)
+                const aircraftSymbol = document.querySelector('.aircraft-symbol');
+                if (aircraftSymbol) {
+                    aircraftSymbol.style.transform = `translate(-50%, -50%) rotate(${roll}deg)`;
+                }
+
+                // Kritik açılar için uyarı renkleri
+                updateCompassWarnings(roll, pitch, yaw);
+
+            } catch (error) {
+                console.error('Pusula güncelleme hatası:', error);
+            }
+        }
+
+        // Pusula uyarı renklerini güncelle
+        function updateCompassWarnings(roll, pitch, yaw) {
+            const rollElement = document.getElementById('compass-roll');
+            const pitchElement = document.getElementById('compass-pitch');
+
+            // Roll uyarısı (±30° üzeri tehlikeli)
+            if (Math.abs(roll) > 30) {
+                rollElement.style.color = '#DC143C'; // Kırmızı
+                rollElement.style.fontWeight = 'bold';
+            } else if (Math.abs(roll) > 15) {
+                rollElement.style.color = '#FF8C00'; // Turuncu
+                rollElement.style.fontWeight = 'bold';
+            } else {
+                rollElement.style.color = 'var(--primary-color)';
+                rollElement.style.fontWeight = 'normal';
+            }
+
+            // Pitch uyarısı (±25° üzeri tehlikeli)
+            if (Math.abs(pitch) > 25) {
+                pitchElement.style.color = '#DC143C'; // Kırmızı
+                pitchElement.style.fontWeight = 'bold';
+            } else if (Math.abs(pitch) > 12) {
+                pitchElement.style.color = '#FF8C00'; // Turuncu
+                pitchElement.style.fontWeight = 'bold';
+            } else {
+                pitchElement.style.color = 'var(--primary-color)';
+                pitchElement.style.fontWeight = 'normal';
             }
         }
 
