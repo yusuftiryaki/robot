@@ -542,6 +542,10 @@
                     <div class="status-label">Pitch</div>
                 </div>
                 <div class="status-item">
+                    <div class="status-value" id="imu-yaw">--°</div>
+                    <div class="status-label">Yaw</div>
+                </div>
+                <div class="status-item">
                     <div class="status-value" id="battery-voltage">-- V</div>
                     <div class="status-label">Voltaj</div>
                 </div>
@@ -632,6 +636,19 @@
                     document.getElementById('gps-satellites').textContent = data.sensors.gps.satellites || '--';
                     document.getElementById('gps-lat').textContent = `${data.sensors.gps.latitude?.toFixed(6) || '--'}°`;
                     document.getElementById('gps-lon').textContent = `${data.sensors.gps.longitude?.toFixed(6) || '--'}°`;
+                }
+
+                // IMU verileri
+                if (data.sensors && data.sensors.imu) {
+                    document.getElementById('imu-roll').textContent = `${data.sensors.imu.roll?.toFixed(2) || '--'}°`;
+                    document.getElementById('imu-pitch').textContent = `${data.sensors.imu.pitch?.toFixed(2) || '--'}°`;
+                    document.getElementById('imu-yaw').textContent = `${data.sensors.imu.yaw?.toFixed(2) || '--'}°`;
+                }
+
+                // Batarya detay verileri
+                if (data.sensors && data.sensors.battery) {
+                    document.getElementById('battery-voltage').textContent = `${data.sensors.battery.voltage?.toFixed(2) || '--'} V`;
+                    document.getElementById('battery-current').textContent = `${data.sensors.battery.current?.toFixed(2) || '--'} A`;
                 }
 
                 // Şarj istasyonu mesafesi

@@ -39,13 +39,13 @@ def istek_logla(f):
 
             # Log'a kaydet
             logger = logging.getLogger("WebArayuz")
-            logger.info(f"🌐 API İsteği: {metot} {yol} - IP: {uzak_adres}")
+            logger.debug(f"🌐 API İsteği: {metot} {yol} - IP: {uzak_adres}")
 
             # Fonksiyonu çalıştır
             sonuc = f(*args, **kwargs)
 
             # Başarı logu
-            logger.info(f"✅ API Yanıtı: {yol} - Başarılı")
+            logger.debug(f"✅ API Yanıtı: {yol} - Başarılı")
 
             return sonuc
         except Exception as e:
