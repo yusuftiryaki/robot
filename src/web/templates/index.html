@@ -889,22 +889,44 @@
         let joystickActive = false;
         let joystickCenter = { x: 0, y: 0 };
         let statusUpdateInterval;
+        let consecutiveErrors = 0; // Art arda gelen hata sayısı
+        const maxConsecutiveErrors = 3; // 3 hata sonrası bağlantı kesildi say
 
         // Sayfa yüklendiğinde bağlantı kontrol et
         function checkConnection() {
-            fetch('/api/robot/status')
-                .then(response => response.json())
+            // Timeout ile fetch - 5 saniye timeout
+            const timeoutPromise = new Promise((_, reject) => {
+                setTimeout(() => reject(new Error('Bağlantı zaman aşımı')), 5000);
+            });
+
+            Promise.race([
+                fetch('/api/robot/status'),
+                timeoutPromise
+            ])
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                    }
+                    return response.json();
+                })
                 .then(data => {
                     if (data.success) {
                         isConnected = true;
                         updateConnectionStatus(true);
                         updateRobotStatus(data.data);
+                    } else {
+                        throw new Error(data.error || 'API hatası');
                     }
                 })
                 .catch(error => {
-                    isConnected = false;
-                    updateConnectionStatus(false);
-                    console.error('Bağlantı hatası:', error);
+                    consecutiveErrors++;
+                    console.error(`Bağlantı hatası (${consecutiveErrors}/${maxConsecutiveErrors}):`, error);
+
+                    // Sadece art arda belirli sayıda hata gelirse bağlantı durumunu değiştir
+                    if (consecutiveErrors >= maxConsecutiveErrors) {
+                        isConnected = false;
+                        updateConnectionStatus(false);
+                    }
                 });
         }
 
@@ -916,6 +938,7 @@
             if (connected) {
                 indicator.className = 'status-indicator status-connected';
                 text.textContent = 'Bağlı';
+                consecutiveErrors = 0; // Başarılı bağlantıda hata sayacını sıfırla
             } else {
                 indicator.className = 'status-indicator status-disconnected';
                 text.textContent = 'Bağlantı Yok';
@@ -1130,7 +1153,7 @@
 
                     // Diğer bilgiler
                     areaElement.textContent = `${boundaryStatus.garden_area?.toFixed(1) || '--'} m²`;
-                    violationsElement.textContent = `${boundaryStatus.fence_violations }`;
+                    violationsElement.textContent = `${boundaryStatus.fence_violations}`;
 
                     // İhlal oranına göre renk
                     const violationRate = boundaryStatus.violation_rate || 0;
