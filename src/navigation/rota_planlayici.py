@@ -465,23 +465,28 @@ class RotaPlanlayici:
             return await self._uzak_mesafe_planlamasi(mevcut_konum, dock_lat, dock_lon, konum_takipci)
 
     async def _hassas_sarj_yaklasimu(self, mevcut_konum, dock_lat: float, dock_lon: float, konum_takipci) -> List[RotaNoktasi]:
-        """🎯 GPS hata payı içindeyken hassas yaklaşım"""
-        self.logger.info("🎯 Hassas şarj yaklaşımı - kamera ve sensörler aktif")
+        """🎯 GPS hata payı içindeyken hassas yaklaşım - AprilTag destekli"""
+        self.logger.info("🎯 Hassas şarj yaklaşımı - AprilTag ve kamera aktif")
 
         # Şarj istasyonunu local koordinata çevir
         dock_x, dock_y = konum_takipci._gps_to_local(dock_lat, dock_lon)
 
-        # Basit düz rota oluştur - çok yavaş
+        # AprilTag destekli hassas yaklaşım rotası
         rota = []
-        steps = 5  # 5 adımda yaklaş
+        steps = 10  # 10 adımda yaklaş - daha hassas
 
         for i in range(steps + 1):
             progress = i / steps
             x = mevcut_konum.x + (dock_x - mevcut_konum.x) * progress
             y = mevcut_konum.y + (dock_y - mevcut_konum.y) * progress
 
-            # Son adımlarda çok yavaş
-            if progress > 0.8:
+            # AprilTag menzili içinde mi?
+            kalan_mesafe = math.sqrt((dock_x - x)**2 + (dock_y - y)**2)
+
+            # Hız kontrolü - AprilTag menzilinde daha hassas
+            if kalan_mesafe <= 0.5:  # 50cm - AprilTag menzili
+                hiz = 0.02  # 2 cm/s - AprilTag hassas mod
+            elif progress > 0.8:
                 hiz = 0.05  # 5 cm/s - ultra yavaş
             elif progress > 0.6:
                 hiz = 0.1   # 10 cm/s - çok yavaş
@@ -495,10 +500,20 @@ class RotaPlanlayici:
                 nokta=Nokta(x, y),
                 yon=yon,
                 hiz=hiz,
-                aksesuar_aktif=False
+                aksesuar_aktif=False  # Şarj yaklaşımında fırçalar kapalı
             )
             rota.append(rota_noktasi)
 
+        # Son nokta: AprilTag yaklaşım başlangıcı
+        apriltag_baslangic = RotaNoktasi(
+            nokta=Nokta(dock_x - 0.5, dock_y),  # 50cm önce dur
+            yon=konum_takipci.get_bearing_to_gps(dock_lat, dock_lon),
+            hiz=0.0,  # Dur ve AprilTag yaklaşım başlat
+            aksesuar_aktif=False
+        )
+        rota.append(apriltag_baslangic)
+
+        self.logger.info(f"✅ AprilTag destekli hassas yaklaşım rotası: {len(rota)} nokta")
         return rota
 
     async def _gps_rehberli_yaklaşım(self, mevcut_konum, dock_lat: float, dock_lon: float, konum_takipci) -> List[RotaNoktasi]:

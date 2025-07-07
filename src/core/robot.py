@@ -193,6 +193,20 @@ class BahceRobotu:
             self.logger.error(f"❌ Bahçe sınır kontrol hatası: {e}")
             self.bahce_sinir_kontrol = None
 
+        # AprilTag destekli şarj yaklaşım sistemi
+        try:
+            from navigation.sarj_istasyonu_yaklasici import SarjIstasyonuYaklasici
+            sarj_config = self.config.get("missions", {}).get("charging", {})
+            if sarj_config.get("apriltag"):
+                self.sarj_yaklasici = SarjIstasyonuYaklasici(sarj_config)
+                self.logger.info("✅ AprilTag şarj yaklaşıcı hazır")
+            else:
+                self.logger.warning("⚠️ AprilTag şarj konfigürasyonu bulunamadı")
+                self.sarj_yaklasici = None
+        except Exception as e:
+            self.logger.error(f"❌ AprilTag şarj yaklaşıcı hatası: {e}")
+            self.sarj_yaklasici = None
+
         # Vision & AI - güvenli başlatma
         try:
             self.kamera_islemci = KameraIslemci(self.config.get(
@@ -459,31 +473,81 @@ class BahceRobotu:
             await self._kamera_sarj_arama(sensor_data)
 
     async def _hassas_sarj_yaklasimu(self, sensor_data: Dict[str, Any], gps_analiz: Dict[str, Any]):
-        """🎯 Son mesafede hassas yaklaşım (kamera + sensörler)"""
-        self.logger.info("🎯 Hassas şarj yaklaşımı - kamera aktif")
+        """🎯 Son mesafede hassas yaklaşım - AprilTag destekli"""
+        self.logger.info("🎯 AprilTag destekli hassas şarj yaklaşımı")
 
-        # Kamera ile şarj istasyonu ara
-        kamera_data = await self.kamera_islemci.sarj_istasyonu_ara()
+        # AprilTag yaklaşıcı var mı kontrol et
+        if self.sarj_yaklasici and self.kamera_islemci:
+            try:
+                # Kamera görüntüsünü al
+                kamera_data = await self.kamera_islemci.goruntu_al()
 
-        if kamera_data.get("sarj_istasyonu_gorunur"):
-            # Kamera ile görüldü - AI karar verici devreye
-            if self.karar_verici:
-                karar = await self.karar_verici._sarj_arama_karari(kamera_data)
-                hareket_komut = HareketKomut(
-                    linear_hiz=karar.hareket.get("linear", 0.05),  # Çok yavaş
-                    angular_hiz=karar.hareket.get("angular", 0.0),
-                    sure=0.5
-                )
-                if self.motor_kontrolcu:
-                    await self.motor_kontrolcu.hareket_uygula(hareket_komut)
+                if kamera_data is not None:
+                    # AprilTag yaklaşıcıdan hareket komutu al
+                    yaklasim_komutu = await self.sarj_yaklasici.sarj_istasyonuna_yaklas(kamera_data)
 
-            # Şarja çok yakınsa docking moduna geç
-            if kamera_data.get("mesafe", 10) < 0.5:
-                self.logger.info("🔌 Docking mesafesinde - şarj moduna geçiliyor")
-                self.durum_degistir(RobotDurumu.SARJ_OLMA)
+                    if yaklasim_komutu:
+                        # Hareket komutunu uygula
+                        hareket_komut = HareketKomut(
+                            linear_hiz=yaklasim_komutu.linear_hiz,
+                            angular_hiz=yaklasim_komutu.angular_hiz,
+                            sure=yaklasim_komutu.sure
+                        )
+
+                        if self.motor_kontrolcu:
+                            await self.motor_kontrolcu.hareket_uygula(hareket_komut)
+
+                        # Yaklaşım durumunu logla
+                        durum_bilgisi = self.sarj_yaklasici.get_yaklasim_durumu()
+                        self.logger.debug(f"🎯 AprilTag durum: {durum_bilgisi['durum']}")
+
+                        # Yaklaşım tamamlandı mı kontrol et
+                        if durum_bilgisi['durum'] == 'tamamlandi':
+                            self.logger.info("✅ AprilTag yaklaşım tamamlandı - şarj moduna geçiliyor")
+                            self.durum_degistir(RobotDurumu.SARJ_OLMA)
+                    else:
+                        # Yaklaşım tamamlandı
+                        self.logger.info("✅ AprilTag yaklaşım tamamlandı - şarj moduna geçiliyor")
+                        self.durum_degistir(RobotDurumu.SARJ_OLMA)
+
+                else:
+                    self.logger.warning("⚠️ Kamera görüntüsü alınamadı")
+
+            except Exception as e:
+                self.logger.error(f"❌ AprilTag yaklaşım hatası: {e}")
+                # Fallback - eski yöntem
+                await self._fallback_sarj_yaklasimu(sensor_data, gps_analiz)
         else:
-            # Kamera görmüyor - GPS yönünde yavaş hareket
-            bearing = math.radians(gps_analiz["bearing"])
+            # AprilTag sistemi yok - fallback
+            await self._fallback_sarj_yaklasimu(sensor_data, gps_analiz)
+
+    async def _fallback_sarj_yaklasimu(self, sensor_data: Dict[str, Any], gps_analiz: Dict[str, Any]):
+        """🔄 Fallback şarj yaklaşımı - eski yöntem"""
+        self.logger.info("🔄 Fallback şarj yaklaşımı")
+
+        # Kamera ile şarj istasyonu ara (eski yöntem)
+        if self.kamera_islemci:
+            kamera_data = await self.kamera_islemci.sarj_istasyonu_ara()
+
+            if kamera_data.get("sarj_istasyonu_gorunur"):
+                # Kamera ile görüldü - AI karar verici devreye
+                if self.karar_verici:
+                    karar = await self.karar_verici._sarj_arama_karari(kamera_data)
+                    hareket_komut = HareketKomut(
+                        linear_hiz=karar.hareket.get("linear", 0.05),  # Çok yavaş
+                        angular_hiz=karar.hareket.get("angular", 0.0),
+                        sure=0.5
+                    )
+                    if self.motor_kontrolcu:
+                        await self.motor_kontrolcu.hareket_uygula(hareket_komut)
+
+                # Şarja çok yakınsa docking moduna geç
+                if kamera_data.get("mesafe", 10) < 0.5:
+                    self.logger.info("🔌 Docking mesafesinde - şarj moduna geçiliyor")
+                    self.durum_degistir(RobotDurumu.SARJ_OLMA)
+            else:
+                # Kamera görmüyor - GPS yönünde yavaş hareket
+                bearing = math.radians(gps_analiz["bearing"])
             hareket_komut = HareketKomut(
                 linear_hiz=0.05,  # 5 cm/s
                 angular_hiz=bearing * 0.1,  # Yavaş dönüş

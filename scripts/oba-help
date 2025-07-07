@@ -23,9 +23,8 @@ echo ""
 
 echo "🚀 ROBOT BAŞLATMA ÖRNEKLERİ:"
 echo "  oba-start                    # Normal mod"
-echo "  oba-start --sim              # Simülasyon modu"
 echo "  oba-start --debug            # Debug modu"
-echo "  oba-start --sim --debug      # Simülasyon + Debug"
+echo "  oba-start --web-only         # Sadece Web Server mod"
 echo "  oba-start --help             # Yardım mesajını göster"
 echo ""
 

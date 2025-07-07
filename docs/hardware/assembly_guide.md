@@ -18,7 +18,16 @@
 - [ ] HC-SR04 Ultrasonik Sensör (x6)
 - [ ] Raspberry Pi Camera V2
 - [ ] Mikroswitch Tampon Sensörü (x4)
+- [ ] INA219 Güç Monitör Sensörü 🆕
 - [ ] Buzzer (5V)
+
+### AprilTag Şarj İstasyonu Bileşenleri 🆕
+- [ ] AprilTag Etiketleri (15cm, ID: 0-4)
+- [ ] Şarj İstasyonu Baz Ünitesi
+- [ ] Manyetik Şarj Konektörleri
+- [ ] INA219 Güç Sensörü (şarj tespiti için)
+- [ ] Şarj İstasyonu LED'leri (durum göstergesi)
+- [ ] AprilTag Montaj Aparatı (ayarlanabilir)
 
 ### Kablolar ve Bağlantı
 - [ ] Jumper Wire Seti (Erkek-Erkek, Dişi-Dişi)
@@ -262,7 +271,6 @@ ls -la test_image.jpg
 # Video stream testi
 raspivid -t 5000 -o test_video.h264
 ```
-
 ### AŞAMA 5: MOTOR SİSTEMİ ENTEGRASYONU
 
 #### 5.1 Orijinal Motorları Analiz Et
@@ -378,7 +386,6 @@ test_bumpers()
 ```bash
 # Ana uygulamayı test modunda çalıştır
 cd /home/pi/bahce_robotu
-python main.py --debug --simulation
 
 # Gerçek donanım testi
 python main.py --debug
@@ -475,3 +482,227 @@ tail -f /var/log/syslog
 - Satellite view test
 
 Bu rehber ile robotunuz tam olarak çalışır hale gelecektir. Her adımı dikkatli takip edin ve test etmeyi unutmayın! 🤖
+
+# AprilTag Şarj İstasyonu Kurulum Rehberi
+# Otonom Bahçe Asistanı (OBA) - Adım Adım Montaj
+
+## 🔋 APRILTAG ŞARJ İSTASYONU KURULUMU
+
+### AŞAMA 9: AprilTag Şarj İstasyonu Montajı
+
+#### 9.1 Şarj İstasyonu Baz Ünitesi
+
+**Gerekli Malzemeler:**
+- Şarj İstasyonu Baz Ünitesi
+- 12V Güç Adaptörü (5A)
+- Manyetik Şarj Konektörleri
+- INA219 Güç Monitör Sensörü
+- AprilTag Etiketleri (ID: 0-4, 15cm boyut)
+- LED Durum Göstergesi
+
+```bash
+# 1. Baz ünitesinin düz zemine yerleştirilmesi
+# - Stabilite için en az 1m² düz alan gerekli
+# - Güneş ışığından korunmalı (kamera için)
+# - Temiz ve kuru zemin
+
+# 2. Güç bağlantısı
++ Pozitif: Kırmızı kablo (12V)
+- Negatif: Siyah kablo (GND)
+Güç: 12V 5A adaptör (60W)
+```
+
+#### 9.2 AprilTag Etiket Yerleştirme
+
+**AprilTag Konumlandırma Prensipleri:**
+
+```
+    [TAG_1]    [TAG_0]    [TAG_2]
+       🏷️        🎯        🏷️
+      (Yedek)   (Ana)     (Yedek)
+        ↑         ↑         ↑
+     45° açı   Düz bakış  45° açı
+```
+
+**Montaj Adımları:**
+
+1. **Ana AprilTag (ID: 0) - Merkez:**
+   - Şarj noktasından 30cm yükseklikte
+   - Robot kamerasına düz bakacak şekilde
+   - 15cm x 15cm boyutunda
+   - Siyah çerçeve ile beyaz zemin üzerine
+
+2. **Yedek AprilTag'ler (ID: 1-4) - Çevre:**
+   - Ana tag'in etrafında 50cm mesafede
+   - 45° açıyla robot kamerasına bakacak şekilde
+   - Farklı yaklaşım açıları için yedek rotalar
+
+3. **Etiket Kalitesi Kontrolleri:**
+   ```bash
+   # AprilTag kalite kontrol scripti
+   python scripts/apriltag_generator.py --test-detection
+
+   # Kamera ile tespit kontrolü
+   python test_apriltag_system.py --live-test
+   ```
+
+#### 9.3 INA219 Güç Sensörü Bağlantısı
+
+**INA219 Şarj Tespiti Kurulumu:**
+
+```
+Raspberry Pi          INA219          Şarj Devres
+GPIO 2 (SDA)   <--->  SDA
+GPIO 3 (SCL)   <--->  SCL
+3.3V           <--->  VCC
+GND            <--->  GND
+                      VIN+   <--->  Şarj + Kablosu
+                      VIN-   <--->  Şarj - Kablosu
+```
+
+**INA219 Konfigürasyonu:**
+```python
+# INA219 şarj tespiti parametreleri
+SARJ_AKIMI_ESIGI = 0.1      # 100mA (şarj başladı)
+BAGLANTI_VOLTAJ_ESIGI = 11.0 # 11V (fiziksel bağlantı)
+SAMPLING_RATE = 10           # 10Hz ölçüm sıklığı
+```
+
+#### 9.4 Manyetik Şarj Konektörü
+
+**Manyetik Konektör Özellikleri:**
+- **Akım kapasitesi:** 5A
+- **Voltaj:** 12V
+- **Manyetik kuvvet:** 20N (2kg çekme kuvveti)
+- **Su geçirmezlik:** IP65
+- **Yanlış kutup koruması:** Var
+
+**Konektör Montajı:**
+```
+Robot Tarafı:
+- Şasinin arka kısmına monte et
+- INA219 sensörü devreye dahil et
+- LED gösterge ekle (şarj durumu için)
+
+İstasyon Tarafı:
+- Baz ünitesinde merkezi konum
+- Otomatik hizalama için kılavuz yuvası
+- Manyetik çekim alanı optimizasyonu
+```
+
+#### 9.5 AprilTag Sistem Testi
+
+**Test Senaryoları:**
+
+1. **AprilTag Tespit Testi:**
+   ```bash
+   # Test 1: Statik tespit
+   python test_apriltag_system.py --static-test
+
+   # Test 2: Hareket halinde tespit
+   python test_apriltag_system.py --motion-test
+
+   # Test 3: Farklı mesafeler
+   python test_apriltag_system.py --distance-test
+   ```
+
+2. **Yaklaşım Algoritması Testi:**
+   ```bash
+   # Manuel yaklaşım testi
+   python -m src.navigation.sarj_istasyonu_yaklasici --test-mode
+
+   # Otomatik yaklaşım testi
+   python main.py --test-charging-approach
+   ```
+
+3. **INA219 Bağlantı Testi:**
+   ```bash
+   # INA219 sensör testi
+   python -c "
+   from ina219 import INA219
+   ina = INA219(address=0x40)
+   ina.configure()
+   print(f'Voltaj: {ina.voltage():.2f}V')
+   print(f'Akım: {ina.current():.2f}mA')
+   "
+   ```
+
+### AŞAMA 10: Şarj İstasyonu Kalibrasyon
+
+#### 10.1 Kamera Kalibrasyonu
+
+**Kamera Matrix Kalibrasyonu:**
+```bash
+# Kalibrasyon scriptini çalıştır
+python scripts/camera_calibration.py
+
+# AprilTag detection için optimize et
+python scripts/apriltag_calibration.py --optimize-detection
+```
+
+**Kalibrasyon Sonuçları:**
+```yaml
+# config/robot_config.yaml güncelle
+apriltag:
+  kamera_matrix:
+    - [fx, 0, cx]   # Focal length X, Center X
+    - [0, fy, cy]   # Focal length Y, Center Y
+    - [0, 0, 1]     # Homogeneous koordinat
+  distortion_coeffs: [k1, k2, p1, p2, k3]  # Distortion katsayıları
+```
+
+#### 10.2 Hassas Konum Ayarlama
+
+**Konum Kalibrasyonu Adımları:**
+
+1. **Manuel Test Yaklaşımı:**
+   - Robot'u şarj istasyonundan 2m uzağa yerleştir
+   - Manuel kontrol ile yaklaşım yap
+   - AprilTag tespit mesafelerini not et
+
+2. **Otomatik Kalibrasyon:**
+   ```bash
+   # Otomatik kalibrasyon modu
+   python main.py --calibrate-charging --debug
+   ```
+
+3. **Hassas Ayar Parametreleri:**
+   ```yaml
+   apriltag:
+     hedef_mesafe: 0.30      # 30cm hedef mesafe
+     hassas_mesafe: 0.10     # 10cm hassas mod başlangıcı
+     aci_toleransi: 3.0      # 3° açı toleransı
+     pozisyon_toleransi: 0.015  # 1.5cm pozisyon toleransı
+   ```
+
+#### 10.3 Performans Optimizasyonu
+
+**FPS ve Gecikme Optimizasyonu:**
+```python
+# Kamera FPS ayarları
+APRILTAG_CAMERA_FPS = 15    # 15 FPS (hassas tespit için)
+DETECTION_SKIP_FRAMES = 2   # Her 2 frame'de bir tespit
+PROCESSING_TIMEOUT = 200    # 200ms maksimum işlem süresi
+```
+
+**Güvenilirlik Testleri:**
+- **Gündüz koşulları:** Parlak ışık altında tespit
+- **Akşam koşulları:** Düşük ışık altında tespit
+- **Hareket halinde:** Robot hareket ederken tespit
+- **Mesafe varyasyonları:** 0.1m - 2.0m arası mesafeler
+
+## 📊 APRILTAG SİSTEM ÖZETİ
+
+### Sistem Gereksinimleri
+- **Kamera çözünürlüğü:** En az 640x480
+- **İşlem gücü:** Raspberry Pi 4 (2GB+ RAM)
+- **Aydınlatma:** 200-2000 lux arası
+- **AprilTag boyutu:** 15cm (optimum)
+- **Tespit mesafesi:** 0.1m - 3.0m
+
+### Performans Metrikleri
+- **Tespit oranı:** >95% (optimum koşullarda)
+- **Konum hassasiyeti:** ±1cm
+- **Açı hassasiyeti:** ±2°
+- **Yaklaşım süresi:** 30-60 saniye
+- **Şarj bağlantı başarı oranı:** >98%

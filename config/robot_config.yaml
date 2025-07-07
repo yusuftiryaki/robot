@@ -121,6 +121,29 @@ missions:
       final_range: 2.0 # Son 2m kamera + sensörlerle
       precision_range: 0.5 # Son 50cm hassas yerleştirme
 
+    # AprilTag destekli hassas yaklaşım
+    apriltag:
+      sarj_istasyonu_tag_id: 0 # Şarj istasyonu AprilTag ID'si
+      tag_boyutu: 0.08 # AprilTag boyutu (metre) - 8cm (küçük)
+      hedef_mesafe: 0.25 # Hedef mesafe (metre) - 25cm
+      hassas_mesafe: 0.08 # Hassas mesafe (metre) - 8cm
+      aci_toleransi: 5.0 # Açı toleransı (derece)
+      pozisyon_toleransi: 0.02 # Pozisyon toleransı (metre) - 2cm
+      yaklasim_hizi: 0.1 # Yaklaşım hızı (m/s)
+      hassas_hiz: 0.02 # Hassas hız (m/s)
+      donme_hizi: 0.2 # Dönme hızı (rad/s)
+
+      # Kamera kalibrasyonu (örnek değerler - kalibrasyon gerekli)
+      kamera_matrix:
+        - [640, 0, 320]
+        - [0, 640, 240]
+        - [0, 0, 1]
+      distortion_coeffs: [0, 0, 0, 0, 0] # Distortion coefficients
+
+      # INA219 güç sensörü parametreleri
+      sarj_akimi_esigi: 0.1 # Şarj akımı eşiği (Amper)
+      baglanti_voltaj_esigi: 11.0 # Bağlantı voltaj eşiği (Volt)
+
 # Web Arayüzü
 web:
   host: "0.0.0.0"

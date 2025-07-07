@@ -15,7 +15,7 @@ code .
 
 # 3. Helper komutları kullan
 oba-help                     # Tüm komutları göster
-oba-start --sim --debug      # Simülasyon modunda test et
+oba-start --debug            # Debug modunda test et
 oba-stop                     # Robotu durdur
 oba-test                     # Testleri çalıştır
 oba-status                   # Sistem durumunu kontrol et
@@ -181,9 +181,8 @@ OBA, geliştirme ve kullanım kolaylığı için bir dizi komut satırı aracı 
 ```bash
 oba-help                     # Tüm komutları ve örnekleri göster
 oba-start                    # Robotu normal modda başlat
-oba-start --sim              # Simülasyon modunda başlat
+oba-start --web-only         # Sadece Web modunda başlat
 oba-start --debug            # Debug modunda başlat
-oba-start --sim --debug      # Simülasyon + Debug modu
 oba-stop                     # Robotu güvenli bir şekilde durdur
 oba-stop --force             # Robotu zorla durdur
 oba-status                   # Robot durumunu kontrol et
@@ -268,7 +267,7 @@ sudo systemctl enable bahce-robotu.service
 ### Debug Modu
 ```bash
 # Detaylı debug çıktısı
-python main.py --debug --simulation
+python main.py --debug
 
 # Sadece belirli modül debug
 export DEBUG_MODULES="navigation,sensors"

@@ -13,6 +13,7 @@ pyyaml==6.0.1                    # Config dosyaları için şart
 # 🎥 COMPUTER VISION (Minimal)
 # =====================================
 opencv-python-headless==4.8.1.78 # GUI olmadan OpenCV (600MB tasarruf!)
+opencv-contrib-python-headless==4.8.1.78 # AprilTag detection için
 Pillow==10.0.0                   # Basit resim işleme
 
 # =====================================
