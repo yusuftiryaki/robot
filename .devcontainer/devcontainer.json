@@ -44,6 +44,9 @@
   "runArgs": [
     "--privileged"
   ],
-  "forwardPorts": [5000, 8000],
+  "forwardPorts": [
+    5000,
+    8000
+  ],
   "remoteUser": "vscode"
 }

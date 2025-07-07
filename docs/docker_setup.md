@@ -92,7 +92,7 @@ oba-quick-deploy
 ### Simülasyon Kapsamı
 
 - **SSH Access**: Real Pi gibi SSH bağlantısı
-- **File Transfer**: rsync ve scp desteği  
+- **File Transfer**: rsync ve scp desteği
 - **Python Environment**: venv ve pip desteği
 - **Service Management**: systemd simülasyonu
 - **Log Management**: Python logging simülasyonu
@@ -110,7 +110,7 @@ oba-quick-deploy
 
 ```bash
 oba-test-env start          # Ortamı başlat
-oba-test-env stop           # Ortamı durdur  
+oba-test-env stop           # Ortamı durdur
 oba-test-env test           # Deployment test
 oba-test-env validate       # Ortam doğrulama
 oba-test-env ssh            # SSH bağlantısı
