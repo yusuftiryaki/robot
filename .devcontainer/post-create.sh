@@ -102,22 +102,44 @@ echo "alias oba-status='/workspaces/oba/scripts/oba-status'" >> ~/.zshrc
 echo "alias oba-logs='/workspaces/oba/scripts/oba-logs'" >> ~/.zshrc
 echo "alias oba-clean='/workspaces/oba/scripts/oba-clean'" >> ~/.zshrc
 
+# Docker permissions için kullanıcıyı docker grubuna ekle
+echo "🐳 Docker permissions ayarlanıyor..."
+sudo usermod -aG docker $USER || true
+# Docker socket permissions
+sudo chmod 666 /var/run/docker.sock 2>/dev/null || true
+
+# Yeni deployment scriptleri için alias'lar
+echo "alias oba-deploy='/workspaces/oba/scripts/oba-deploy'" >> ~/.bashrc
+echo "alias oba-quick-deploy='/workspaces/oba/scripts/oba-quick-deploy'" >> ~/.bashrc
+echo "alias oba-test-deployment='/workspaces/oba/scripts/oba-test-deployment'" >> ~/.bashrc
+echo "alias oba-test-env='/workspaces/oba/scripts/oba-test-env'" >> ~/.bashrc
+
+echo "alias oba-deploy='/workspaces/oba/scripts/oba-deploy'" >> ~/.zshrc
+echo "alias oba-quick-deploy='/workspaces/oba/scripts/oba-quick-deploy'" >> ~/.zshrc
+echo "alias oba-test-deployment='/workspaces/oba/scripts/oba-test-deployment'" >> ~/.zshrc
+echo "alias oba-test-env='/workspaces/oba/scripts/oba-test-env'" >> ~/.zshrc
+
 # Mevcut session için alias'ları aktif et (hangi shell olursa olsun)
 source ~/.bashrc 2>/dev/null || true
 source ~/.zshrc 2>/dev/null || true
 
 echo "✅ OBA Helper Scripts yüklendi!"
-echo "   oba-help    - Yardım ve komut listesi"
-echo "   oba-start   - Robot başlat"
-echo "   oba-test    - Test suite çalıştır"
-echo "   oba-status  - Robot durumu kontrol"
-echo "   oba-logs    - Log dosyalarını görüntüle"
-echo "   oba-clean   - Geçici dosyaları temizle"
+echo "   oba-help           - Yardım ve komut listesi"
+echo "   oba-start          - Robot başlat"
+echo "   oba-test           - Test suite çalıştır"
+echo "   oba-status         - Robot durumu kontrol"
+echo "   oba-logs           - Log dosyalarını görüntüle"
+echo "   oba-clean          - Geçici dosyaları temizle"
+echo "   oba-deploy         - Raspberry Pi'ye deployment"
+echo "   oba-quick-deploy   - İnteraktif deployment"
+echo "   oba-test-deployment - Deployment test et"
+echo "   oba-test-env       - Docker test ortamı yönet"
 
 echo "🎉 Development environment hazır! Hacı Abi işi bitirdi."
 echo "📝 Şu komutları terminalde kullanabilirsiniz:"
 echo "   oba-help              # Tüm komutları göster"
 echo "   oba-start --debug     # Debug modunda başlat"
-echo "   oba-stop              # Robotu durdur"
 echo "   oba-test              # Testleri çalıştır"
-echo "   oba-status            # Durum kontrol"
+echo "   oba-deploy <ip>       # Pi'ye deployment"
+echo "   oba-test-env start    # Docker test ortamı başlat"
+echo "🐳 Docker desteği aktif - deployment testleri için hazır!"

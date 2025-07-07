@@ -16,17 +16,21 @@ code .
 # 3. Helper komutları kullan
 oba-help                     # Tüm komutları göster
 oba-start --debug            # Debug modunda test et
-oba-stop                     # Robotu durdur
 oba-test                     # Testleri çalıştır
 oba-status                   # Sistem durumunu kontrol et
-oba-logs                     # Log dosyalarını görüntüle
-oba-clean                    # Geçici dosyaları temizle
 
-# 4. VS Code otomatik olarak:
+# 4. Yeni deployment komutları (Docker ile)
+oba-deploy 192.168.1.100     # Pi'ye otomatik deployment
+oba-quick-deploy             # İnteraktif deployment sihirbazı
+oba-test-env start           # Docker test ortamı başlat
+oba-test-deployment          # Deployment doğrulama
+
+# 5. VS Code otomatik olarak:
+# - Docker desteği (Docker socket mounting ile)
+# - Deployment test ortamı (Docker tabanlı Pi simülasyonu)
 # - Önerilen ekstensionları yükleyecek
 # - Debug konfigürasyonlarını hazırlayacak
-# - Geçici dosyaları gizleyecek
-# - Python environment'ı ayarlayacak
+# - Python environment'ı ayarlayacek
 ```
 
 ### 🚀 Otomatik Raspberry Pi Deployment (Önerilen)
