@@ -1,0 +1,222 @@
+#!/bin/bash
+# 🧪 OBA Deployment Test Script
+# Hacı Abi'nin test aracı!
+
+# Renkler
+readonly RED='\033[0;31m'
+readonly GREEN='\033[0;32m'
+readonly YELLOW='\033[1;33m'
+readonly BLUE='\033[0;34m'
+readonly CYAN='\033[0;36m'
+readonly NC='\033[0m'
+
+# Test sonuçları
+TESTS_PASSED=0
+TESTS_FAILED=0
+TESTS_TOTAL=0
+
+# Test fonksiyonu
+run_test() {
+    local test_name="$1"
+    local test_command="$2"
+    local pi_ip="$3"
+    local pi_user="$4"
+    local pi_password="$5"
+    local pi_port="${6:-22}"
+
+    TESTS_TOTAL=$((TESTS_TOTAL + 1))
+
+    echo -e "${BLUE}🧪 Test: $test_name${NC}"
+
+    # SSH komutu hazırla
+    local ssh_cmd="ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no -p $pi_port $pi_user@$pi_ip"
+
+    if [[ -n "$pi_password" ]]; then
+        ssh_cmd="sshpass -p '$pi_password' $ssh_cmd"
+    fi
+
+    # Test çalıştır
+    if eval "$ssh_cmd '$test_command'" &> /dev/null; then
+        echo -e "${GREEN}   ✅ BAŞARILI${NC}"
+        TESTS_PASSED=$((TESTS_PASSED + 1))
+        return 0
+    else
+        echo -e "${RED}   ❌ BAŞARISIZ${NC}"
+        TESTS_FAILED=$((TESTS_FAILED + 1))
+        return 1
+    fi
+}
+
+# Ana test fonksiyonu
+test_deployment() {
+    local pi_ip="$1"
+    local pi_user="$2"
+    local pi_password="$3"
+    local pi_port="${4:-22}"
+
+    echo -e "${CYAN}"
+    echo "🧪 OBA Robot Deployment Test"
+    echo "============================="
+    echo -e "${NC}"
+    echo "🍓 Target: $pi_user@$pi_ip"
+    echo ""    # SSH bağlantı testi
+    echo -e "${YELLOW}📡 BAĞLANTI TESTLERİ${NC}"
+    run_test "SSH Bağlantısı" "echo 'OK'" "$pi_ip" "$pi_user" "$pi_password" "$pi_port"
+    run_test "Sudo Yetkisi" "sudo -n true" "$pi_ip" "$pi_user" "$pi_password" "$pi_port"
+
+    echo ""
+
+    # Sistem testleri
+    echo -e "${YELLOW}⚙️ SİSTEM TESTLERİ${NC}"
+    run_test "Python3 Varlığı" "which python3" "$pi_ip" "$pi_user" "$pi_password" "$pi_port"
+    run_test "Git Varlığı" "which git" "$pi_ip" "$pi_user" "$pi_password" "$pi_port"
+    run_test "I2C Desteği" "ls /dev/i2c-*" "$pi_ip" "$pi_user" "$pi_password" "$pi_port"
+    run_test "GPIO Grubu" "groups | grep gpio" "$pi_ip" "$pi_user" "$pi_password" "$pi_port"
+
+    echo ""
+
+    # OBA proje testleri
+    echo -e "${YELLOW}🤖 OBA PROJE TESTLERİ${NC}"
+    run_test "OBA Klasörü" "ls -d oba" "$pi_ip" "$pi_user" "$pi_password" "$pi_port"
+    run_test "Python Venv" "ls oba/venv/bin/python" "$pi_ip" "$pi_user" "$pi_password" "$pi_port"
+    run_test "Config Dosyası" "ls oba/config/robot_config.yaml" "$pi_ip" "$pi_user" "$pi_password" "$pi_port"
+    run_test "Script İzinleri" "ls -l oba/scripts/oba-help | grep 'x'" "$pi_ip" "$pi_user" "$pi_password" "$pi_port"
+
+    echo ""
+
+    # Service testleri
+    echo -e "${YELLOW}🚀 SERVİS TESTLERİ${NC}"
+    run_test "Systemd Service" "sudo systemctl is-enabled oba-robot.service" "$pi_ip" "$pi_user" "$pi_password" "$pi_port"
+    run_test "Service Durumu" "sudo systemctl is-active oba-robot.service" "$pi_ip" "$pi_user" "$pi_password" "$pi_port"
+    run_test "Port 8080" "netstat -tlnp | grep 8080" "$pi_ip" "$pi_user" "$pi_password" "$pi_port"
+
+    echo ""
+
+    # Web interface testi
+    echo -e "${YELLOW}🌐 WEB INTERFACE TESTLERİ${NC}"
+    run_test "HTTP Response" "curl -s -o /dev/null -w '%{http_code}' http://localhost:8080 | grep 200" "$pi_ip" "$pi_user" "$pi_password" "$pi_port"
+    run_test "API Endpoint" "curl -s http://localhost:8080/api/robot/status | grep success" "$pi_ip" "$pi_user" "$pi_password" "$pi_port"
+
+    echo ""
+
+    # Python modül testleri
+    echo -e "${YELLOW}🐍 PYTHON MODÜL TESTLERİ${NC}"
+    run_test "Robot Modülü" "cd oba && source venv/bin/activate && python -c 'import src.core.robot'" "$pi_ip" "$pi_user" "$pi_password" "$pi_port"
+    run_test "OpenCV" "cd oba && source venv/bin/activate && python -c 'import cv2'" "$pi_ip" "$pi_user" "$pi_password" "$pi_port"
+    run_test "NumPy" "cd oba && source venv/bin/activate && python -c 'import numpy'" "$pi_ip" "$pi_user" "$pi_password" "$pi_port"
+
+    echo ""
+
+    # Sonuçları göster
+    echo -e "${CYAN}📊 TEST SONUÇLARI${NC}"
+    echo "================="
+    echo -e "${GREEN}✅ Başarılı: $TESTS_PASSED${NC}"
+    echo -e "${RED}❌ Başarısız: $TESTS_FAILED${NC}"
+    echo -e "${BLUE}📋 Toplam: $TESTS_TOTAL${NC}"
+
+    local success_rate=$((TESTS_PASSED * 100 / TESTS_TOTAL))
+    echo -e "${CYAN}📈 Başarı Oranı: %$success_rate${NC}"
+
+    echo ""
+
+    if [[ $TESTS_FAILED -eq 0 ]]; then
+        echo -e "${GREEN}🎉 TÜM TESTLER BAŞARILI!${NC}"
+        echo -e "${GREEN}Robot production-ready! 🚀${NC}"
+        echo ""
+        echo -e "${CYAN}🌐 Web Interface: http://$pi_ip:8080${NC}"
+        return 0
+    else
+        echo -e "${RED}⚠️ BAZI TESTLER BAŞARISIZ!${NC}"
+        echo "Lütfen deployment'ı tekrar kontrol edin."
+        echo ""
+        echo "Yaygın sorunlar için:"
+        echo "• oba-deploy --help"
+        echo "• docs/deployment/raspberry_pi_setup.md"
+        return 1
+    fi
+}
+
+# Yardım mesajı
+show_help() {
+    cat << EOF
+🧪 OBA Robot Deployment Test
+
+Bu script deployment sonrasında sistemi test eder.
+
+KULLANIM:
+    oba-test-deployment --ip <PI_IP> [SEÇENEKLER]
+
+PARAMETRELER:
+    -i, --ip <IP>              Raspberry Pi IP adresi
+    -p, --password <PASS>      SSH şifresi (opsiyonel)
+    -u, --user <USER>          SSH kullanıcısı (varsayılan: pi)
+    -h, --help                 Bu yardım mesajını göster
+
+ÖRNEKLER:
+    oba-test-deployment --ip 192.168.1.100
+    oba-test-deployment -i 192.168.1.100 -p mypassword
+
+TEST KATEGORİLERİ:
+    📡 Bağlantı Testleri
+    ⚙️ Sistem Testleri
+    🤖 OBA Proje Testleri
+    🚀 Servis Testleri
+    🌐 Web Interface Testleri
+    🐍 Python Modül Testleri
+
+Hacı Abi'nin test aracı! 🧪
+EOF
+}
+
+# Parametre parse
+PI_IP=""
+PI_PASSWORD=""
+PI_USER="pi"
+PI_PORT="22"
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        -i|--ip)
+            PI_IP="$2"
+            shift 2
+            ;;
+        -p|--password)
+            PI_PASSWORD="$2"
+            shift 2
+            ;;
+        -u|--user)
+            PI_USER="$2"
+            shift 2
+            ;;
+        --port)
+            PI_PORT="$2"
+            shift 2
+            ;;
+        -h|--help)
+            show_help
+            exit 0
+            ;;
+        *)
+            echo -e "${RED}❌ Bilinmeyen parametre: $1${NC}"
+            echo "Yardım için: oba-test-deployment --help"
+            exit 1
+            ;;
+    esac
+done
+
+# IP kontrolü
+if [[ -z "$PI_IP" ]]; then
+    echo -e "${RED}❌ Raspberry Pi IP adresi gerekli!${NC}"
+    echo "Örnek: oba-test-deployment --ip 192.168.1.100"
+    exit 1
+fi
+
+# sshpass kontrolü
+if [[ -n "$PI_PASSWORD" ]] && ! command -v sshpass &> /dev/null; then
+    echo -e "${RED}❌ sshpass bulunamadı!${NC}"
+    echo "Kurulum: sudo apt install sshpass"
+    exit 1
+fi
+
+# Testleri çalıştır
+test_deployment "$PI_IP" "$PI_USER" "$PI_PASSWORD" "$PI_PORT"

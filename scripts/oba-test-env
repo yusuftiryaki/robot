@@ -1,0 +1,412 @@
+#!/bin/bash
+# 🧪 OBA Deployment Test Environment Manager
+# Hacı Abi'nin test aracı!
+
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+
+# Renkler
+readonly GREEN='\033[0;32m'
+readonly YELLOW='\033[1;33m'
+readonly CYAN='\033[0;36m'
+readonly RED='\033[0;31m'
+readonly BLUE='\033[0;34m'
+readonly NC='\033[0m'
+
+CONTAINER_NAME="oba-test-pi"
+TEST_PORT=2222
+WEB_PORT=8080
+IMAGE_NAME="oba-test-pi"
+
+show_help() {
+    echo -e "${CYAN}"
+    cat << "EOF"
+🧪 OBA Deployment Test Environment
+===================================
+   ____  ____    _      ______ _____ ____ ______
+  / __ \|  _ \  / \    |  ____|_   _/ ___|__   _|
+ | |  | | |_) |/ _ \   | |__    | | \___ \  | |
+ | |__| |  _ </ ___ \  |  __|   | |  ___) | | |
+  \____/|_| \_\_/   \_\|_|     |_| |____/  |_|
+
+   Deployment Script Test Environment
+EOF
+    echo -e "${NC}"
+    echo ""
+    echo "Bu script OBA deployment script'lerini test etmek için"
+    echo "simüle edilmiş Raspberry Pi environment'ı sağlar."
+    echo ""
+    echo -e "${YELLOW}KOMUTLAR:${NC}"
+    echo "  start    - Test container'ı başlat"
+    echo "  stop     - Test container'ı durdur"
+    echo "  restart  - Container'ı yeniden başlat"
+    echo "  clean    - Container'ı sil ve temizle"
+    echo "  ssh      - Container'a SSH ile bağlan"
+    echo "  logs     - Container loglarını göster"
+    echo "  status   - Container durumunu göster"
+    echo "  test     - Deployment script'ini test et"
+    echo "  quick    - Quick deploy test et"
+    echo "  validate - Test deployment'ı doğrula"
+    echo "  shell    - Container içinde bash aç"
+    echo "  rebuild  - Image'ı yeniden build et"
+    echo ""
+    echo -e "${YELLOW}TEST SENARYOLARI:${NC}"
+    echo "  1. ./oba-test-env start"
+    echo "  2. ./oba-test-env test"
+    echo "  3. ./oba-test-env validate"
+    echo "  4. ./oba-test-env clean"
+    echo ""
+    echo -e "${CYAN}Hacı Abi'nin test laboratuvarı! 🧪${NC}"
+}
+
+log_info() {
+    echo -e "${GREEN}ℹ️  $1${NC}"
+}
+
+log_warn() {
+    echo -e "${YELLOW}⚠️  $1${NC}"
+}
+
+log_error() {
+    echo -e "${RED}❌ $1${NC}"
+}
+
+log_step() {
+    echo -e "${CYAN}🔄 $1${NC}"
+}
+
+log_success() {
+    echo -e "${GREEN}✅ $1${NC}"
+}
+
+check_docker() {
+    if ! command -v docker &> /dev/null; then
+        log_error "Docker bulunamadı! Docker Desktop kurmalısınız."
+        exit 1
+    fi
+
+    if ! docker info &> /dev/null; then
+        log_error "Docker daemon çalışmıyor! Docker'ı başlatın."
+        exit 1
+    fi
+}
+
+build_image() {
+    log_step "Docker image build ediliyor..."
+
+    # Dockerfile'ın var olduğunu kontrol et
+    if [ ! -f "$PROJECT_ROOT/docker/Dockerfile.test-pi" ]; then
+        log_error "Dockerfile bulunamadı: $PROJECT_ROOT/docker/Dockerfile.test-pi"
+        exit 1
+    fi
+
+    # Start script'inin executable olduğundan emin ol
+    chmod +x "$PROJECT_ROOT/docker/start-test-env.sh"
+
+    # Image build et
+    docker build \
+        -f "$PROJECT_ROOT/docker/Dockerfile.test-pi" \
+        -t "$IMAGE_NAME" \
+        "$PROJECT_ROOT"
+
+    log_success "Docker image hazır: $IMAGE_NAME"
+}
+
+start_container() {
+    check_docker
+
+    # Image var mı kontrol et
+    if ! docker images | grep -q "$IMAGE_NAME"; then
+        log_warn "Image bulunamadı, build ediliyor..."
+        build_image
+    fi
+
+    # Container zaten çalışıyor mu?
+    if docker ps | grep -q "$CONTAINER_NAME"; then
+        log_warn "Container zaten çalışıyor!"
+        return 0
+    fi
+
+    # Durdurulmuş container var mı?
+    if docker ps -a | grep -q "$CONTAINER_NAME"; then
+        log_step "Eski container temizleniyor..."
+        docker rm "$CONTAINER_NAME" &>/dev/null || true
+    fi
+
+    log_step "Test container başlatılıyor..."
+
+    # Container'ı çalıştır
+    docker run -d \
+        --name "$CONTAINER_NAME" \
+        -p "$TEST_PORT:22" \
+        -p "$WEB_PORT:8080" \
+        --privileged \
+        -v "$PROJECT_ROOT:/host-project:ro" \
+        "$IMAGE_NAME"
+
+    # SSH hazır olmasını bekle
+    log_step "SSH servisinin hazır olması bekleniyor..."
+    for i in {1..30}; do
+        if docker exec "$CONTAINER_NAME" pgrep sshd >/dev/null 2>&1; then
+            break
+        fi
+        sleep 1
+        if [ $i -eq 30 ]; then
+            log_error "SSH servisi 30 saniyede hazır olmadı!"
+            docker logs "$CONTAINER_NAME"
+            exit 1
+        fi
+    done
+
+    log_success "Test container hazır!"
+    echo ""
+    echo -e "${CYAN}📋 BAĞLANTI BİLGİLERİ${NC}"
+    echo "=========================="
+    echo -e "${GREEN}📡 SSH:${NC} ssh -p $TEST_PORT pi@localhost"
+    echo -e "${GREEN}🔑 Şifre:${NC} raspberry"
+    echo -e "${GREEN}🌐 Web:${NC} http://localhost:$WEB_PORT"
+    echo -e "${GREEN}👤 Kullanıcı:${NC} pi"
+    echo ""
+    echo -e "${YELLOW}💡 Test komutları:${NC}"
+    echo "  oba-test-env ssh      # SSH bağlantısı"
+    echo "  oba-test-env test     # Deployment test"
+    echo "  oba-test-env logs     # Logları izle"
+}
+
+stop_container() {
+    if docker ps | grep -q "$CONTAINER_NAME"; then
+        log_step "Container durduruluyor..."
+        docker stop "$CONTAINER_NAME" &>/dev/null
+        log_success "Container durduruldu"
+    else
+        log_warn "Container zaten durdurulmuş"
+    fi
+}
+
+clean_container() {
+    stop_container
+    if docker ps -a | grep -q "$CONTAINER_NAME"; then
+        log_step "Container temizleniyor..."
+        docker rm "$CONTAINER_NAME" &>/dev/null
+        log_success "Container temizlendi"
+    fi
+
+    # Image'ı da sil (opsiyonel)
+    echo -e "${YELLOW}Docker image'ı da silinsin mi? (y/N):${NC}"
+    read -r response
+    if [[ "$response" =~ ^[Yy]$ ]]; then
+        docker rmi "$IMAGE_NAME" &>/dev/null || true
+        log_success "Docker image silindi"
+    fi
+}
+
+ssh_to_container() {
+    if ! docker ps | grep -q "$CONTAINER_NAME"; then
+        log_error "Container çalışmıyor! Önce 'start' komutunu çalıştırın."
+        exit 1
+    fi
+
+    log_info "SSH bağlantısı kuruluyor..."
+    echo -e "${YELLOW}Şifre: raspberry${NC}"
+    ssh -p "$TEST_PORT" -o StrictHostKeyChecking=no pi@localhost
+}
+
+test_deployment() {
+    if ! docker ps | grep -q "$CONTAINER_NAME"; then
+        log_error "Container çalışmıyor! Önce 'start' komutunu çalıştırın."
+        exit 1
+    fi
+
+    log_step "Deployment script test ediliyor..."
+    echo ""
+
+    # Git repository URL'yi güncelle (deployment script'te)
+    local temp_script="/tmp/oba-deploy-test"
+    sed "s|https://github.com/your-repo/oba.git|file:///host-project|g" \
+        "$SCRIPT_DIR/oba-deploy" > "$temp_script"
+    chmod +x "$temp_script"
+
+    # Test deployment'ı çalıştır
+    echo -e "${CYAN}🧪 Test parametreleri:${NC}"
+    echo "  IP: localhost"
+    echo "  Port: $TEST_PORT"
+    echo "  User: pi"
+    echo "  Password: raspberry"
+    echo ""
+
+    "$temp_script" \
+        --ip localhost \
+        --port "$TEST_PORT" \
+        --user pi \
+        --password raspberry \
+        --skip-system-update \
+        --verbose
+
+    # Temp script'i temizle
+    rm -f "$temp_script"
+
+    log_success "Deployment test tamamlandı!"
+}
+
+quick_test() {
+    if ! docker ps | grep -q "$CONTAINER_NAME"; then
+        log_error "Container çalışmıyor! Önce 'start' komutunu çalıştırın."
+        exit 1
+    fi
+
+    log_step "Quick deployment test..."
+
+    # Git repository URL'yi güncelle
+    local temp_script="/tmp/oba-quick-deploy-test"
+
+    # Quick deploy script'ini kopyala ve düzenle
+    cp "$SCRIPT_DIR/oba-quick-deploy" "$temp_script"
+
+    # Otomatik cevaplar için expect benzeri yaklaşım
+    {
+        echo "localhost"           # IP
+        echo "raspberry"          # Password
+        echo "pi"                 # User
+        echo "y"                  # Skip update
+        echo "y"                  # Skip hardware test
+        echo "y"                  # Confirm
+    } | "$temp_script" || true
+
+    rm -f "$temp_script"
+
+    log_success "Quick test tamamlandı!"
+}
+
+validate_deployment() {
+    if ! docker ps | grep -q "$CONTAINER_NAME"; then
+        log_error "Container çalışmıyor! Önce 'start' komutunu çalıştırın."
+        exit 1
+    fi
+
+    log_step "Deployment validation..."
+
+    "$SCRIPT_DIR/oba-test-deployment" \
+        --ip localhost \
+        --port "$TEST_PORT" \
+        --user pi \
+        --password raspberry
+
+    log_success "Validation tamamlandı!"
+}
+
+show_status() {
+    echo -e "${CYAN}📊 Test Environment Durumu${NC}"
+    echo "============================="
+
+    if docker ps | grep -q "$CONTAINER_NAME"; then
+        log_success "Container çalışıyor"
+        echo ""
+        echo -e "${CYAN}📋 Container bilgileri:${NC}"
+        docker ps --filter "name=$CONTAINER_NAME" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+
+        echo ""
+        echo -e "${CYAN}📡 Bağlantı bilgileri:${NC}"
+        echo "  SSH: ssh -p $TEST_PORT pi@localhost"
+        echo "  Web: http://localhost:$WEB_PORT"
+        echo "  Şifre: raspberry"
+
+        echo ""
+        echo -e "${CYAN}💾 Kaynak kullanımı:${NC}"
+        docker stats "$CONTAINER_NAME" --no-stream --format "table {{.CPUPerc}}\t{{.MemUsage}}\t{{.NetIO}}"
+
+    else
+        log_warn "Container çalışmıyor"
+        if docker ps -a | grep -q "$CONTAINER_NAME"; then
+            echo "  (Durdurulmuş container mevcut)"
+        fi
+    fi
+
+    echo ""
+    echo -e "${CYAN}🐳 Docker images:${NC}"
+    docker images | grep -E "(REPOSITORY|$IMAGE_NAME)" || echo "  Image bulunamadı"
+}
+
+show_logs() {
+    if docker ps | grep -q "$CONTAINER_NAME"; then
+        log_info "Container logları (Ctrl+C ile çıkış):"
+        docker logs -f "$CONTAINER_NAME"
+    else
+        log_error "Container çalışmıyor!"
+    fi
+}
+
+container_shell() {
+    if ! docker ps | grep -q "$CONTAINER_NAME"; then
+        log_error "Container çalışmıyor! Önce 'start' komutunu çalıştırın."
+        exit 1
+    fi
+
+    log_info "Container shell açılıyor..."
+    docker exec -it "$CONTAINER_NAME" bash
+}
+
+restart_container() {
+    stop_container
+    start_container
+}
+
+rebuild_image() {
+    log_step "Image yeniden build ediliyor..."
+
+    # Eski image'ı sil
+    docker rmi "$IMAGE_NAME" &>/dev/null || true
+
+    # Yeniden build et
+    build_image
+
+    # Container çalışıyorsa restart et
+    if docker ps | grep -q "$CONTAINER_NAME"; then
+        log_info "Container restart ediliyor..."
+        restart_container
+    fi
+}
+
+# Ana komut işleme
+case "${1:-help}" in
+    start)
+        start_container
+        ;;
+    stop)
+        stop_container
+        ;;
+    restart)
+        restart_container
+        ;;
+    clean)
+        clean_container
+        ;;
+    ssh)
+        ssh_to_container
+        ;;
+    test)
+        test_deployment
+        ;;
+    quick)
+        quick_test
+        ;;
+    validate)
+        validate_deployment
+        ;;
+    status)
+        show_status
+        ;;
+    logs)
+        show_logs
+        ;;
+    shell)
+        container_shell
+        ;;
+    rebuild)
+        rebuild_image
+        ;;
+    help|*)
+        show_help
+        ;;
+esac

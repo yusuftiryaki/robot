@@ -29,7 +29,23 @@ oba-clean                    # Geçici dosyaları temizle
 # - Python environment'ı ayarlayacak
 ```
 
-### Fiziksel Robot Kurulumu
+### 🚀 Otomatik Raspberry Pi Deployment (Önerilen)
+```bash
+# 1. Hızlı kurulum (interaktif)
+oba-quick-deploy
+
+# 2. Komut satırından
+oba-deploy --ip 192.168.1.100 --password mypassword
+
+# 3. Gelişmiş seçenekler
+oba-deploy --ip 192.168.1.100 --password mypassword \
+           --skip-system-update --verbose
+
+# 4. Deployment testi
+oba-test-deployment --ip 192.168.1.100
+```
+
+### 📱 Manuel Raspberry Pi Kurulumu
 ```bash
 # 1. Raspberry Pi OS kurulumu
 # Hardware bağlantı diyagramı: docs/hardware/wiring_diagram.md

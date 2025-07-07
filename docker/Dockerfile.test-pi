@@ -1,0 +1,106 @@
+# 🧪 OBA Test Environment - Raspberry Pi Simülatörü
+# Deployment script'lerini test etmek için SSH container
+
+FROM ubuntu:22.04
+
+# Timezone ayarla (interactive prompt'u önle)
+ENV DEBIAN_FRONTEND=noninteractive
+ENV TZ=Europe/Istanbul
+
+# SSH server ve temel araçları yükle
+RUN apt-get update && apt-get install -y \
+    openssh-server \
+    sudo \
+    curl \
+    wget \
+    git \
+    python3 \
+    python3-pip \
+    python3-venv \
+    systemd \
+    systemctl \
+    i2c-tools \
+    nano \
+    net-tools \
+    htop \
+    build-essential \
+    cmake \
+    pkg-config \
+    libjpeg-dev \
+    libtiff5-dev \
+    libpng-dev \
+    libavcodec-dev \
+    libavformat-dev \
+    libswscale-dev \
+    libv4l-dev \
+    libxvidcore-dev \
+    libx264-dev \
+    libatlas-base-dev \
+    gfortran \
+    libhdf5-dev \
+    libhdf5-serial-dev \
+    python3-dev \
+    ufw \
+    && rm -rf /var/lib/apt/lists/*
+
+# SSH için gerekli dizinleri oluştur
+RUN mkdir /var/run/sshd
+
+# Test kullanıcısı oluştur (Raspberry Pi'deki gibi)
+RUN useradd -m -s /bin/bash pi && \
+    echo 'pi:raspberry' | chpasswd && \
+    usermod -aG sudo pi && \
+    echo 'pi ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
+
+# Root şifresi ayarla (opsiyonel)
+RUN echo 'root:toor' | chpasswd
+
+# SSH ayarları - güvenlik için production'da değiştirin
+RUN sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config && \
+    sed -i 's/#PasswordAuthentication yes/PasswordAuthentication yes/' /etc/ssh/sshd_config && \
+    sed -i 's/#PubkeyAuthentication yes/PubkeyAuthentication yes/' /etc/ssh/sshd_config
+
+# GPIO gruplarını simüle et (Raspberry Pi uyumluluğu için)
+RUN groupadd gpio && \
+    groupadd i2c && \
+    groupadd spi && \
+    groupadd video && \
+    groupadd input && \
+    usermod -aG gpio,i2c,spi,video,input pi
+
+# Raspberry Pi benzeri /dev dosyaları oluştur
+RUN mkdir -p /dev && \
+    touch /dev/i2c-1 /dev/spidev0.0 /dev/video0 && \
+    chmod 666 /dev/i2c-1 /dev/spidev0.0 /dev/video0
+
+# Raspberry Pi config tool simülasyonu
+RUN echo '#!/bin/bash' > /usr/bin/raspi-config && \
+    echo 'echo "Simulated raspi-config: $@"' >> /usr/bin/raspi-config && \
+    echo 'exit 0' >> /usr/bin/raspi-config && \
+    chmod +x /usr/bin/raspi-config
+
+# OS release bilgisini Raspberry Pi'ye benzet
+RUN echo 'PRETTY_NAME="Raspberry Pi OS Lite (Test Environment)"' > /etc/os-release && \
+    echo 'NAME="Raspberry Pi OS"' >> /etc/os-release && \
+    echo 'VERSION_ID="11"' >> /etc/os-release && \
+    echo 'VERSION="11 (bullseye)"' >> /etc/os-release && \
+    echo 'ID=raspbian' >> /etc/os-release
+
+# SSH anahtarı oluştur
+RUN ssh-keygen -A
+
+# Systemd için gerekli ayarlar
+RUN systemctl enable ssh
+
+# Test için port'ları expose et
+EXPOSE 22 8080
+
+# Başlangıç script'i
+COPY docker/start-test-env.sh /start-test-env.sh
+RUN chmod +x /start-test-env.sh
+
+# Çalışma dizini
+WORKDIR /home/pi
+
+# Container başlatıldığında SSH daemon'ı çalıştır
+CMD ["/start-test-env.sh"]

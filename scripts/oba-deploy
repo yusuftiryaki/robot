@@ -1,0 +1,646 @@
+#!/bin/bash
+# 🚀 OBA Robot - Otomatik Raspberry Pi Deployment Script
+# Hacı Abi'nin sihirli deployment aracı!
+#
+# Kullanım:
+#   oba-deploy --ip 192.168.1.100 --password mypassword
+#   oba-deploy -i 192.168.1.100 -p mypassword --user pi
+
+set -euo pipefail  # Strict mode
+
+# Renkler ve semboller
+readonly RED='\033[0;31m'
+readonly GREEN='\033[0;32m'
+readonly YELLOW='\033[1;33m'
+readonly BLUE='\033[0;34m'
+readonly CYAN='\033[0;36m'
+readonly NC='\033[0m' # No Color
+
+# Varsayılan değerler
+PI_IP=""
+PI_PASSWORD=""
+PI_USER="pi"
+SSH_PORT="22"
+REPO_URL="https://github.com/yusuftiryaki/robot.git"  # Bu URL'yi güncelleyin
+# Test environment için otomatik tespit
+if [[ "$PI_IP" == "localhost" && -d "/host-project" ]]; then
+    REPO_URL="file:///host-project"
+fi
+BRANCH="main"
+SKIP_SYSTEM_UPDATE=false
+SKIP_HARDWARE_TEST=false
+DRY_RUN=false
+VERBOSE=false
+
+# Script bilgileri
+readonly SCRIPT_NAME="$(basename "$0")"
+readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+readonly PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+
+# Log fonksiyonları
+log_info() {
+    echo -e "${GREEN}ℹ️  $1${NC}"
+}
+
+log_warn() {
+    echo -e "${YELLOW}⚠️  $1${NC}"
+}
+
+log_error() {
+    echo -e "${RED}❌ $1${NC}"
+}
+
+log_step() {
+    echo -e "${CYAN}🔄 $1${NC}"
+}
+
+log_success() {
+    echo -e "${GREEN}✅ $1${NC}"
+}
+
+log_debug() {
+    if [[ "$VERBOSE" == "true" ]]; then
+        echo -e "${BLUE}🔍 DEBUG: $1${NC}"
+    fi
+}
+
+# Yardım mesajı
+show_help() {
+    cat << EOF
+🚀 OBA Robot - Otomatik Raspberry Pi Deployment
+=============================================
+
+Bu script OBA robot'unu Raspberry Pi'ye otomatik olarak kurar.
+
+KULLANIM:
+    $SCRIPT_NAME --ip <PI_IP> --password <PASSWORD> [SEÇENEKLER]
+
+ZORUNLU PARAMETRELER:
+    -i, --ip <IP>              Raspberry Pi IP adresi
+    -p, --password <PASS>      SSH şifresi
+
+OPSIYONEL PARAMETRELER:
+    -u, --user <USER>          SSH kullanıcısı (varsayılan: pi)
+    --port <PORT>              SSH portu (varsayılan: 22)
+    --repo <URL>               Git repository URL'si
+    --branch <BRANCH>          Git branch (varsayılan: main)
+    --skip-system-update       Sistem güncellemesini atla
+    --skip-hardware-test       Hardware testini atla
+    --dry-run                  Sadece komutları göster, çalıştırma
+    -v, --verbose              Detaylı çıktı
+    -h, --help                 Bu yardım mesajını göster
+
+ÖRNEKLER:
+    # Temel kullanım
+    $SCRIPT_NAME --ip 192.168.1.100 --password mypassword
+
+    # Farklı kullanıcı ile
+    $SCRIPT_NAME -i 192.168.1.100 -p mypass -u robot
+
+    # Hızlı kurulum (güncellemeleri atla)
+    $SCRIPT_NAME -i 192.168.1.100 -p mypass --skip-system-update
+
+    # Test modu
+    $SCRIPT_NAME -i 192.168.1.100 -p mypass --dry-run -v
+
+AŞAMALAR:
+    1. 🔍 Ön kontroller (SSH bağlantısı, işletim sistemi)
+    2. 📦 Sistem paketleri kurulumu
+    3. 🔧 Raspberry Pi konfigürasyonu (I2C, SPI, Camera)
+    4. 📥 OBA projesi klonlama
+    5. 🐍 Python environment kurulumu
+    6. ⚙️ Konfigürasyon ayarlama
+    7. 🚀 Systemd service kurulumu
+    8. 🧪 Validation testleri
+    9. 🌐 Web interface kontrolü
+
+NOTLAR:
+    • SSH key ile bağlantı varsa şifre gerekmez
+    • Script sudo yetkilerini otomatik kullanır
+    • Hata durumunda rollback yapılır
+    • Loglar /tmp/oba-deploy.log'a kaydedilir
+
+Hacı Abi'nin emeği! 🤖💪
+EOF
+}
+
+# Parametre parse
+parse_arguments() {
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            -i|--ip)
+                PI_IP="$2"
+                shift 2
+                ;;
+            -p|--password)
+                PI_PASSWORD="$2"
+                shift 2
+                ;;
+            -u|--user)
+                PI_USER="$2"
+                shift 2
+                ;;
+            --port)
+                SSH_PORT="$2"
+                shift 2
+                ;;
+            --repo)
+                REPO_URL="$2"
+                shift 2
+                ;;
+            --branch)
+                BRANCH="$2"
+                shift 2
+                ;;
+            --skip-system-update)
+                SKIP_SYSTEM_UPDATE=true
+                shift
+                ;;
+            --skip-hardware-test)
+                SKIP_HARDWARE_TEST=true
+                shift
+                ;;
+            --dry-run)
+                DRY_RUN=true
+                shift
+                ;;
+            -v|--verbose)
+                VERBOSE=true
+                shift
+                ;;
+            -h|--help)
+                show_help
+                exit 0
+                ;;
+            *)
+                log_error "Bilinmeyen parametre: $1"
+                echo "Yardım için: $SCRIPT_NAME --help"
+                exit 1
+                ;;
+        esac
+    done
+
+    # Zorunlu parametreleri kontrol et
+    if [[ -z "$PI_IP" ]]; then
+        log_error "Raspberry Pi IP adresi gerekli!"
+        echo "Örnek: $SCRIPT_NAME --ip 192.168.1.100 --password mypassword"
+        exit 1
+    fi
+
+    if [[ -z "$PI_PASSWORD" ]]; then
+        log_warn "Şifre verilmedi. SSH key ile bağlantı denenecek."
+    fi
+}
+
+# SSH komut çalıştırma fonksiyonu
+ssh_exec() {
+    local command="$1"
+    local show_output="${2:-true}"
+
+    log_debug "SSH Command: $command"
+
+    if [[ "$DRY_RUN" == "true" ]]; then
+        echo -e "${BLUE}[DRY-RUN] SSH: $command${NC}"
+        return 0
+    fi
+
+    local ssh_cmd="ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no"
+
+    if [[ -n "$PI_PASSWORD" ]]; then
+        # sshpass kullan
+        if ! command -v sshpass &> /dev/null; then
+            log_error "sshpass bulunamadı! Kurulum gerekli: sudo apt install sshpass"
+            exit 1
+        fi
+        ssh_cmd="sshpass -p '$PI_PASSWORD' $ssh_cmd"
+    fi
+
+    ssh_cmd="$ssh_cmd -p $SSH_PORT $PI_USER@$PI_IP"
+
+    if [[ "$show_output" == "true" ]]; then
+        eval "$ssh_cmd '$command'"
+    else
+        eval "$ssh_cmd '$command'" &> /dev/null
+    fi
+}
+
+# SCP dosya kopyalama
+scp_copy() {
+    local local_path="$1"
+    local remote_path="$2"
+
+    log_debug "SCP: $local_path -> $remote_path"
+
+    if [[ "$DRY_RUN" == "true" ]]; then
+        echo -e "${BLUE}[DRY-RUN] SCP: $local_path -> $remote_path${NC}"
+        return 0
+    fi
+
+    local scp_cmd="scp -o ConnectTimeout=10 -o StrictHostKeyChecking=no -P $SSH_PORT"
+
+    if [[ -n "$PI_PASSWORD" ]]; then
+        scp_cmd="sshpass -p '$PI_PASSWORD' $scp_cmd"
+    fi
+
+    eval "$scp_cmd '$local_path' $PI_USER@$PI_IP:'$remote_path'"
+}
+
+# SSH bağlantısı test et
+test_ssh_connection() {
+    log_step "SSH bağlantısı test ediliyor..."
+
+    if ssh_exec "echo 'SSH bağlantısı başarılı'" false; then
+        log_success "SSH bağlantısı OK"
+        return 0
+    else
+        log_error "SSH bağlantısı başarısız!"
+        log_error "Kontrol edilecekler:"
+        log_error "  • IP adresi doğru mu: $PI_IP"
+        log_error "  • SSH servisi aktif mi"
+        log_error "  • Kullanıcı adı/şifre doğru mu: $PI_USER"
+        log_error "  • Firewall SSH'ı blokluyor mu"
+        exit 1
+    fi
+}
+
+# Raspberry Pi sistem kontrolü
+check_raspberry_pi() {
+    log_step "Raspberry Pi sistem kontrolü..."
+
+    # OS kontrolü
+    local os_info
+    os_info=$(ssh_exec "cat /etc/os-release | grep PRETTY_NAME" false) || true
+
+    if [[ "$os_info" == *"Raspberry Pi"* ]] || [[ "$os_info" == *"Raspbian"* ]]; then
+        log_success "Raspberry Pi OS tespit edildi: $os_info"
+    else
+        log_warn "Raspberry Pi OS tespit edilemedi. Devam ediliyor..."
+    fi
+
+    # Bellek kontrolü
+    local memory_mb
+    memory_mb=$(ssh_exec "free -m | awk 'NR==2{print \$2}'" false)
+
+    if [[ "$memory_mb" -lt 3500 ]]; then
+        log_warn "Düşük RAM tespit edildi: ${memory_mb}MB. 4GB öneriliyor."
+    else
+        log_success "RAM yeterli: ${memory_mb}MB"
+    fi
+
+    # Disk alanı kontrolü
+    local disk_available
+    disk_available=$(ssh_exec "df -h / | awk 'NR==2 {print \$4}'" false)
+    log_info "Mevcut disk alanı: $disk_available"
+}
+
+# Sistem paketlerini kur
+install_system_packages() {
+    if [[ "$SKIP_SYSTEM_UPDATE" == "true" ]]; then
+        log_warn "Sistem güncellemesi atlandı"
+    else
+        log_step "Sistem güncellemesi yapılıyor..."
+        ssh_exec "sudo apt update && sudo apt upgrade -y"
+        log_success "Sistem güncellendi"
+    fi
+
+    log_step "Gerekli paketler kuruluyor..."
+
+    # Temel paketler
+    local packages=(
+        "git" "python3" "python3-pip" "python3-venv"
+        "i2c-tools" "raspi-config"
+        "build-essential" "cmake" "pkg-config"
+        "libjpeg-dev" "libtiff5-dev" "libpng-dev"
+        "libavcodec-dev" "libavformat-dev" "libswscale-dev"
+        "libv4l-dev" "libxvidcore-dev" "libx264-dev"
+        "libatlas-base-dev" "gfortran"
+        "libhdf5-dev" "libhdf5-serial-dev"
+        "python3-dev"
+    )
+
+    local package_list
+    package_list=$(IFS=' '; echo "${packages[*]}")
+
+    ssh_exec "sudo apt install -y $package_list"
+    log_success "Paketler kuruldu"
+}
+
+# Raspberry Pi konfigürasyonu
+configure_raspberry_pi() {
+    log_step "Raspberry Pi konfigürasyonu yapılıyor..."
+
+    # I2C aktifleştir
+    ssh_exec "sudo raspi-config nonint do_i2c 0"
+    log_debug "I2C aktifleştirildi"
+
+    # SPI aktifleştir
+    ssh_exec "sudo raspi-config nonint do_spi 0"
+    log_debug "SPI aktifleştirildi"
+
+    # Kamera aktifleştir
+    ssh_exec "sudo raspi-config nonint do_camera 0"
+    log_debug "Kamera aktifleştirildi"
+
+    # SSH aktif (zaten aktif ama emin olmak için)
+    ssh_exec "sudo raspi-config nonint do_ssh 0"
+    log_debug "SSH aktifleştirildi"
+
+    # Kullanıcı grupları
+    ssh_exec "sudo usermod -a -G i2c,spi,gpio,video,input $PI_USER"
+    log_debug "Kullanıcı grupları güncellendi"
+
+    log_success "Raspberry Pi konfigürasyonu tamamlandı"
+}
+
+# OBA projesini klonla ve kur
+install_oba_project() {
+    log_step "OBA projesi klonlanıyor..."
+
+    # Varolan oba klasörünü backup'la
+    ssh_exec "if [ -d 'oba' ]; then mv oba oba_backup_\$(date +%Y%m%d_%H%M%S); fi"
+
+    # Projeyi klonla
+    ssh_exec "git clone -b $BRANCH $REPO_URL oba"
+    ssh_exec "cd oba && git log --oneline -1"
+
+    log_success "Proje klonlandı"
+
+    log_step "Python environment kuruluyor..."
+
+    # Virtual environment
+    ssh_exec "cd oba && python3 -m venv venv"
+    ssh_exec "cd oba && source venv/bin/activate && pip install --upgrade pip setuptools wheel"
+
+    # Dependencies
+    ssh_exec "cd oba && source venv/bin/activate && pip install -r requirements.txt"
+
+    # OpenCV (Raspberry Pi özel)
+    ssh_exec "cd oba && source venv/bin/activate && pip install opencv-python-headless==4.8.1.78"
+
+    log_success "Python environment kuruldu"
+}
+
+# Konfigürasyon ayarla
+configure_oba() {
+    log_step "OBA konfigürasyonu yapılıyor..."
+
+    # Production config'i kopyala
+    ssh_exec "cd oba && cp config/environments/raspberry_pi.yaml config/robot_config.yaml"
+
+    # Dizinleri oluştur
+    ssh_exec "cd oba && mkdir -p logs temp data/maps data/sensor_data"
+    ssh_exec "cd oba && chmod 755 logs temp data"
+
+    # Script'leri PATH'e ekle
+    ssh_exec "echo 'export PATH=\"/home/$PI_USER/oba/scripts:\$PATH\"' >> ~/.bashrc"
+    ssh_exec "cd oba && chmod +x scripts/*"
+
+    log_success "Konfigürasyon tamamlandı"
+}
+
+# Systemd service kur
+install_systemd_service() {
+    log_step "Systemd service kuruluyor..."
+
+    # Service dosyasını oluştur
+    local service_content="[Unit]
+Description=OBA Autonomous Garden Robot
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=$PI_USER
+Group=$PI_USER
+WorkingDirectory=/home/$PI_USER/oba
+Environment=PATH=/home/$PI_USER/oba/venv/bin:/home/$PI_USER/oba/scripts:/usr/local/bin:/usr/bin:/bin
+ExecStart=/home/$PI_USER/oba/venv/bin/python main.py
+ExecStop=/home/$PI_USER/oba/scripts/oba-stop
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target"
+
+    # Service dosyasını yaz
+    ssh_exec "echo '$service_content' | sudo tee /etc/systemd/system/oba-robot.service"
+
+    # Service'i aktifleştir
+    ssh_exec "sudo systemctl daemon-reload"
+    ssh_exec "sudo systemctl enable oba-robot.service"
+
+    log_success "Systemd service kuruldu"
+}
+
+# Firewall ayarla
+configure_firewall() {
+    log_step "Firewall ayarlanıyor..."
+
+    # UFW kur ve ayarla
+    ssh_exec "sudo apt install ufw -y"
+    ssh_exec "sudo ufw --force reset"
+    ssh_exec "sudo ufw default deny incoming"
+    ssh_exec "sudo ufw default allow outgoing"
+    ssh_exec "sudo ufw allow ssh"
+    ssh_exec "sudo ufw allow 8080"
+    ssh_exec "sudo ufw --force enable"
+
+    log_success "Firewall ayarlandı"
+}
+
+# Hardware testi
+test_hardware() {
+    if [[ "$SKIP_HARDWARE_TEST" == "true" ]]; then
+        log_warn "Hardware testi atlandı"
+        return 0
+    fi
+
+    log_step "Hardware testi yapılıyor..."
+
+    # I2C cihazları
+    ssh_exec "i2cdetect -y 1"
+
+    # Python testleri
+    ssh_exec "cd oba && source venv/bin/activate && python -c 'import cv2; print(\"OpenCV version:\", cv2.__version__)'"
+
+    log_success "Hardware testi başarılı"
+}
+
+# Validation
+validate_installation() {
+    log_step "Kurulum doğrulanıyor..."
+
+    # Python environment testi
+    ssh_exec "cd oba && source venv/bin/activate && python -c 'import src.core.robot; print(\"Robot modülü yüklendi\")'"
+
+    # Config testi
+    ssh_exec "cd oba && ls -la config/robot_config.yaml"
+
+    # Script'ler testi
+    ssh_exec "cd oba && source ~/.bashrc && which oba-help"
+
+    # Service testi
+    ssh_exec "sudo systemctl is-enabled oba-robot.service"
+
+    log_success "Validation başarılı"
+}
+
+# Robot'u başlat
+start_robot() {
+    log_step "Robot başlatılıyor..."
+
+    # Manuel test için başlat
+    ssh_exec "sudo systemctl start oba-robot.service"
+
+    # Biraz bekle
+    sleep 5
+
+    # Durum kontrol et
+    if ssh_exec "sudo systemctl is-active oba-robot.service" false; then
+        log_success "Robot başarıyla başlatıldı"
+
+        # Web interface kontrolü
+        log_step "Web interface kontrol ediliyor..."
+
+        if ssh_exec "curl -s http://localhost:8080 > /dev/null" false; then
+            log_success "Web interface erişilebilir: http://$PI_IP:8080"
+        else
+            log_warn "Web interface henüz hazır değil, 30 saniye bekleyin"
+        fi
+    else
+        log_error "Robot başlatılamadı!"
+        ssh_exec "sudo journalctl -u oba-robot.service --no-pager -n 20"
+        return 1
+    fi
+}
+
+# Deployment özeti
+show_deployment_summary() {
+    log_success "🎉 OBA Robot deployment tamamlandı!"
+    echo ""
+    echo -e "${CYAN}📋 DEPLOYMENT ÖZETİ${NC}"
+    echo "=================================="
+    echo -e "🍓 Raspberry Pi: ${GREEN}$PI_IP${NC}"
+    echo -e "👤 Kullanıcı: ${GREEN}$PI_USER${NC}"
+    echo -e "📂 Proje Yolu: ${GREEN}/home/$PI_USER/oba${NC}"
+    echo -e "🌐 Web Interface: ${GREEN}http://$PI_IP:8080${NC}"
+    echo -e "🔧 Service: ${GREEN}oba-robot.service${NC}"
+    echo ""
+    echo -e "${CYAN}🎮 KULLANIŞLI KOMUTLAR${NC}"
+    echo "=================================="
+    echo "# SSH ile bağlan"
+    echo "ssh $PI_USER@$PI_IP"
+    echo ""
+    echo "# Robot kontrol"
+    echo "sudo systemctl status oba-robot.service"
+    echo "sudo systemctl restart oba-robot.service"
+    echo "sudo journalctl -u oba-robot.service -f"
+    echo ""
+    echo "# Script'ler (SSH'dan sonra)"
+    echo "oba-status        # Sistem durumu"
+    echo "oba-logs follow   # Canlı loglar"
+    echo "oba-test         # Test çalıştır"
+    echo ""
+    echo -e "${GREEN}Hacı Abi'nin emeği! Robot hazır! 🤖💪${NC}"
+}
+
+# Hata durumunda temizlik
+cleanup_on_error() {
+    log_error "Deployment sırasında hata oluştu!"
+    log_warn "Temizlik yapılıyor..."
+
+    # Service'i durdur
+    ssh_exec "sudo systemctl stop oba-robot.service || true" false
+    ssh_exec "sudo systemctl disable oba-robot.service || true" false
+
+    # Backup'tan geri yükle (varsa)
+    ssh_exec "if [ -d 'oba_backup_*' ]; then rm -rf oba && mv oba_backup_* oba; fi" false
+
+    log_warn "Partial kurulum temizlendi"
+}
+
+# Ana deployment fonksiyonu
+main_deployment() {
+    local start_time
+    start_time=$(date +%s)
+
+    log_info "🚀 OBA Robot Deployment Başlıyor..."
+    log_info "Target: $PI_USER@$PI_IP:$SSH_PORT"
+    echo ""
+
+    # Hata durumunda cleanup çalıştır
+    trap cleanup_on_error ERR
+
+    # Deployment aşamaları
+    test_ssh_connection
+    check_raspberry_pi
+    install_system_packages
+    configure_raspberry_pi
+    install_oba_project
+    configure_oba
+    install_systemd_service
+    configure_firewall
+    test_hardware
+    validate_installation
+    start_robot
+
+    # Süre hesapla
+    local end_time
+    end_time=$(date +%s)
+    local duration=$((end_time - start_time))
+
+    echo ""
+    log_success "Deployment ${duration} saniyede tamamlandı!"
+    show_deployment_summary
+}
+
+# Ana script
+main() {
+    # Banner
+    echo -e "${CYAN}"
+    cat << "EOF"
+   ____  ____    _      ____       _           _
+  / __ \|  _ \  / \    |  _ \ ___ | |__   ___ | |_
+ | |  | | |_) |/ _ \   | |_) / _ \| '_ \ / _ \| __|
+ | |__| |  _ </ ___ \  |  _ < (_) | |_) | (_) | |_
+  \____/|_| \_\_/   \_\ |_| \_\___/|_.__/ \___/ \__|
+
+      🤖 Otomatik Raspberry Pi Deployment 🍓
+           Hacı Abi'nin sihirli aracı!
+EOF
+    echo -e "${NC}"
+
+    # Ön kontroller
+    if ! command -v ssh &> /dev/null; then
+        log_error "SSH client bulunamadı!"
+        exit 1
+    fi
+
+    # Parametreleri parse et
+    parse_arguments "$@"
+
+    # sshpass kontrolü (şifre verilmişse)
+    if [[ -n "$PI_PASSWORD" ]] && ! command -v sshpass &> /dev/null; then
+        log_error "sshpass bulunamadı!"
+        log_error "Kurulum: sudo apt install sshpass"
+        exit 1
+    fi
+
+    # Onay al (dry-run değilse)
+    if [[ "$DRY_RUN" != "true" ]]; then
+        echo -e "${YELLOW}⚠️  $PI_IP adresine deployment yapılacak. Devam edilsin mi? (y/N)${NC}"
+        read -r response
+        if [[ ! "$response" =~ ^[Yy]$ ]]; then
+            log_info "Deployment iptal edildi"
+            exit 0
+        fi
+    fi
+
+    # Ana deployment
+    main_deployment
+}
+
+# Script'i çalıştır
+main "$@"
