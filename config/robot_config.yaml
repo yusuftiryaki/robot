@@ -145,11 +145,11 @@ missions:
       baglanti_voltaj_esigi: 11.0 # Bağlantı voltaj eşiği (Volt)
 
 # Web Arayüzü
-web:
+web_interface:
   host: "0.0.0.0"
   port: 5000
   secret_key: "haci_abi_secret_2024"
-
+  
 # Güvenlik
 safety:
   emergency_stop_pin: 17

@@ -21,27 +21,21 @@ TEST_PORT=2222
 WEB_PORT=8080
 IMAGE_NAME="oba-test-pi"
 
-# Akıllı IP tespiti - Dev container içinde miyiz?
+# Dinamik IP tespiti - Container'ın gerçek IP'sini al
 detect_target_ip() {
-    # Dev container içinde mi kontrol et
-    if [ -n "${REMOTE_CONTAINERS}" ] || [ -n "${CODESPACES}" ] || [ -f "/.dockerenv" ]; then
-        # Dev container içindeyiz, host IP'sini bul
-        local host_ip
-        host_ip=$(ip route show default | awk '/default/ {print $3}')
-        if [ -n "$host_ip" ]; then
-            echo "$host_ip"
-        else
-            # Fallback: docker0 bridge gateway
-            echo "172.17.0.1"
-        fi
+    if docker ps | grep -q "$CONTAINER_NAME"; then
+        # Container çalışıyorsa IP'sini al
+        docker inspect "$CONTAINER_NAME" --format='{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' 2>/dev/null || echo "127.0.0.1"
     else
-        # Normal host ortamında localhost kullan
-        echo "localhost"
+        # Container çalışmıyorsa localhost döndür
+        echo "127.0.0.1"
     fi
 }
 
-# Global değişken olarak target IP'yi ayarla
-TARGET_IP=$(detect_target_ip)
+# Global değişken olarak target IP'yi dinamik olarak al
+get_target_ip() {
+    detect_target_ip
+}
 
 show_help() {
     echo -e "${CYAN}"
@@ -160,7 +154,7 @@ start_container() {
 
     log_step "Test container başlatılıyor..."
 
-    # Container'ı çalıştır
+    # Container'ı default bridge network ile çalıştır (dev container ile aynı network)
     docker run -d \
         --name "$CONTAINER_NAME" \
         -p "$TEST_PORT:22" \
@@ -184,13 +178,20 @@ start_container() {
     done
 
     log_success "Test container hazır!"
+
+    # Dinamik IP'yi al
+    local target_ip
+    target_ip=$(detect_target_ip)
+
     echo ""
     echo -e "${CYAN}📋 BAĞLANTI BİLGİLERİ${NC}"
     echo "=========================="
-    echo -e "${GREEN}📡 SSH:${NC} ssh -p $TEST_PORT pi@$TARGET_IP"
+    echo -e "${GREEN}📡 SSH (dev container'dan):${NC} ssh -p 22 pi@$target_ip"
+    echo -e "${GREEN}📡 SSH (localhost'tan):${NC} ssh -p $TEST_PORT pi@localhost"
     echo -e "${GREEN}🔑 Şifre:${NC} raspberry"
-    echo -e "${GREEN}🌐 Web:${NC} http://$TARGET_IP:$WEB_PORT"
+    echo -e "${GREEN}🌐 Web:${NC} http://$target_ip:$WEB_PORT"
     echo -e "${GREEN}👤 Kullanıcı:${NC} pi"
+    echo -e "${GREEN}🔗 Container IP:${NC} $target_ip"
     echo ""
     echo -e "${YELLOW}💡 Test komutları:${NC}"
     echo "  oba-test-env ssh      # SSH bağlantısı"
@@ -231,9 +232,13 @@ ssh_to_container() {
         exit 1
     fi
 
-    log_info "SSH bağlantısı kuruluyor..."
+    local target_ip
+    target_ip=$(detect_target_ip)
+
+    log_info "SSH bağlantısı kuruluyor ($target_ip)..."
     echo -e "${YELLOW}Şifre: raspberry${NC}"
-    ssh -p "$TEST_PORT" -o StrictHostKeyChecking=no pi@$TARGET_IP
+    # Container'ın gerçek IP'sine port 22 ile bağlan (port mapping değil)
+    ssh -p 22 -o StrictHostKeyChecking=no pi@"$target_ip"
 }
 
 test_deployment() {
@@ -242,33 +247,28 @@ test_deployment() {
         exit 1
     fi
 
+    # Dinamik IP al
+    local target_ip
+    target_ip=$(detect_target_ip)
+
     log_step "Deployment script test ediliyor..."
     echo ""
 
-    # Git repository URL'yi güncelle (deployment script'te)
-    local temp_script="/tmp/oba-deploy-test"
-    sed "s|https://github.com/yusuftiryaki/robot.git|file:///host-project|g" \
-        "$SCRIPT_DIR/oba-deploy" > "$temp_script"
-    chmod +x "$temp_script"
-
     # Test deployment'ı çalıştır
     echo -e "${CYAN}🧪 Test parametreleri:${NC}"
-    echo "  IP: $TARGET_IP"
-    echo "  Port: $TEST_PORT"
+    echo "  IP: $target_ip"
+    echo "  Port: 22 (container internal)"
     echo "  User: pi"
     echo "  Password: raspberry"
     echo ""
 
-    "$temp_script" \
-        --ip $TARGET_IP \
-        --port "$TEST_PORT" \
+    "$SCRIPT_DIR/oba-deploy" \
+        --ip "$target_ip" \
+        --port 22 \
         --user pi \
         --password raspberry \
         --skip-system-update \
         --verbose
-
-    # Temp script'i temizle
-    rm -f "$temp_script"
 
     log_success "Deployment test tamamlandı!"
 }
@@ -278,6 +278,10 @@ quick_test() {
         log_error "Container çalışmıyor! Önce 'start' komutunu çalıştırın."
         exit 1
     fi
+
+    # Dinamik IP al
+    local target_ip
+    target_ip=$(detect_target_ip)
 
     log_step "Quick deployment test..."
 
@@ -289,7 +293,7 @@ quick_test() {
 
     # Otomatik cevaplar için expect benzeri yaklaşım
     {
-        echo "$TARGET_IP"         # IP
+        echo "$target_ip"         # IP
         echo "raspberry"          # Password
         echo "pi"                 # User
         echo "y"                  # Skip update
@@ -308,11 +312,15 @@ validate_deployment() {
         exit 1
     fi
 
+    # Dinamik IP al
+    local target_ip
+    target_ip=$(detect_target_ip)
+
     log_step "Deployment validation..."
 
     "$SCRIPT_DIR/oba-test-deployment" \
-        --ip $TARGET_IP \
-        --port "$TEST_PORT" \
+        --ip "$target_ip" \
+        --port 22 \
         --user pi \
         --password raspberry
 
@@ -325,14 +333,21 @@ show_status() {
 
     if docker ps | grep -q "$CONTAINER_NAME"; then
         log_success "Container çalışıyor"
+
+        # Dinamik IP al
+        local target_ip
+        target_ip=$(detect_target_ip)
+
         echo ""
         echo -e "${CYAN}📋 Container bilgileri:${NC}"
         docker ps --filter "name=$CONTAINER_NAME" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
 
         echo ""
         echo -e "${CYAN}📡 Bağlantı bilgileri:${NC}"
-        echo "  SSH: ssh -p $TEST_PORT pi@$TARGET_IP"
-        echo "  Web: http://$TARGET_IP:$WEB_PORT"
+        echo "  SSH (dev container'dan): ssh -p 22 pi@$target_ip"
+        echo "  SSH (localhost'tan): ssh -p $TEST_PORT pi@localhost"
+        echo "  Web: http://$target_ip:$WEB_PORT"
+        echo "  Container IP: $target_ip"
         echo "  Şifre: raspberry"
 
         echo ""

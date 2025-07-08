@@ -487,7 +487,7 @@ class WebArayuz:
         # Config'ten değerleri al, parametre verilmişse onu kullan
         final_host = host or self.konfig.get('host', '0.0.0.0')
         final_port = port or self.konfig.get('port', 5000)
-        final_debug = debug if debug is not None else self.konfig.get('debug', False)
+        final_debug = debug or self.konfig.get('debug', False)
 
         self.logger.info(f"🌐 Web sunucusu başlatılıyor: http://{final_host}:{final_port}")
         if final_debug:

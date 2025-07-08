@@ -4,7 +4,7 @@
 #
 # Kullanım:
 #   oba-deploy --ip 192.168.1.100 --password mypassword
-#   oba-deploy -i 192.168.1.100 -p mypassword --user pi
+#   oba-deploy    # Test environment için otomatik tespit (dinamik IP)
 
 set -euo pipefail  # Strict mode
 
@@ -22,15 +22,12 @@ PI_PASSWORD=""
 PI_USER="pi"
 SSH_PORT="22"
 REPO_URL="https://github.com/yusuftiryaki/robot.git"  # Bu URL'yi güncelleyin
-# Test environment için otomatik tespit
-if [[ "$PI_IP" == "localhost" && -d "/host-project" ]]; then
-    REPO_URL="file:///host-project"
-fi
 BRANCH="main"
 SKIP_SYSTEM_UPDATE=false
 SKIP_HARDWARE_TEST=false
 DRY_RUN=false
 VERBOSE=false
+USE_SCP_COPY=false
 
 # Script bilgileri
 readonly SCRIPT_NAME="$(basename "$0")"
@@ -60,7 +57,7 @@ log_success() {
 
 log_debug() {
     if [[ "$VERBOSE" == "true" ]]; then
-        echo -e "${BLUE}🔍 DEBUG: $1${NC}"
+        echo -e "${BLUE}🔍 DEBUG: $1${NC}" >&2
     fi
 }
 
@@ -79,7 +76,7 @@ ZORUNLU PARAMETRELER:
     -i, --ip <IP>              Raspberry Pi IP adresi
     -p, --password <PASS>      SSH şifresi
 
-OPSIYONEL PARAMETRELER:
+OPSİYONEL PARAMETRELER:
     -u, --user <USER>          SSH kullanıcısı (varsayılan: pi)
     --port <PORT>              SSH portu (varsayılan: 22)
     --repo <URL>               Git repository URL'si
@@ -88,6 +85,7 @@ OPSIYONEL PARAMETRELER:
     --skip-hardware-test       Hardware testini atla
     --dry-run                  Sadece komutları göster, çalıştırma
     -v, --verbose              Detaylı çıktı
+    --use-scp                  Proje dosyalarını git clone yerine SCP ile kopyala
     -h, --help                 Bu yardım mesajını göster
 
 ÖRNEKLER:
@@ -168,6 +166,10 @@ parse_arguments() {
                 VERBOSE=true
                 shift
                 ;;
+            --use-scp)
+                USE_SCP_COPY=true
+                shift
+                ;;
             -h|--help)
                 show_help
                 exit 0
@@ -190,14 +192,23 @@ parse_arguments() {
     if [[ -z "$PI_PASSWORD" ]]; then
         log_warn "Şifre verilmedi. SSH key ile bağlantı denenecek."
     fi
+
+    # Test environment için otomatik tespit
+    if [[ "$PI_IP" =~ ^172\. ]]; then
+        USE_SCP_COPY=true
+        log_debug "Test environment tespit edildi (IP: $PI_IP), SCP kopyalama aktifleştirildi"
+    fi
 }
 
 # SSH komut çalıştırma fonksiyonu
 ssh_exec() {
     local command="$1"
     local show_output="${2:-true}"
+    local show_debug="${3:-$show_output}"  # Varsayılan olarak show_output ile aynı
 
-    log_debug "SSH Command: $command"
+    if [[ "$show_debug" == "true" ]]; then
+        log_debug "SSH Command: $command"
+    fi
 
     if [[ "$DRY_RUN" == "true" ]]; then
         echo -e "${BLUE}[DRY-RUN] SSH: $command${NC}"
@@ -217,10 +228,12 @@ ssh_exec() {
 
     ssh_cmd="$ssh_cmd -p $SSH_PORT $PI_USER@$PI_IP"
 
+    log_debug "Final SSH command: $ssh_cmd '$command'"
+
     if [[ "$show_output" == "true" ]]; then
         eval "$ssh_cmd '$command'"
     else
-        eval "$ssh_cmd '$command'" &> /dev/null
+        eval "$ssh_cmd '$command'" 2>/dev/null
     fi
 }
 
@@ -269,27 +282,34 @@ check_raspberry_pi() {
 
     # OS kontrolü
     local os_info
-    os_info=$(ssh_exec "cat /etc/os-release | grep PRETTY_NAME" false) || true
+    os_info=$(ssh_exec "cat /etc/os-release | grep PRETTY_NAME" false false) || true
+
+    log_debug "OS Info çıktısı: [$os_info]"
 
     if [[ "$os_info" == *"Raspberry Pi"* ]] || [[ "$os_info" == *"Raspbian"* ]]; then
         log_success "Raspberry Pi OS tespit edildi: $os_info"
     else
         log_warn "Raspberry Pi OS tespit edilemedi. Devam ediliyor..."
+        log_debug "Aranan kelimeler: 'Raspberry Pi' veya 'Raspbian'"
     fi
 
     # Bellek kontrolü
+    log_debug "Bellek kontrolü başlıyor..."
     local memory_mb
-    memory_mb=$(ssh_exec "free -m | awk 'NR==2{print \$2}'" false)
+    memory_mb=$(ssh_exec 'free -m | awk "NR==2{print \$2}"' false) || memory_mb="0"
+    log_debug "Memory MB: [$memory_mb]"
 
-    if [[ "$memory_mb" -lt 3500 ]]; then
+    if [[ -n "$memory_mb" ]] && [[ "$memory_mb" =~ ^[0-9]+$ ]] && [[ "$memory_mb" -lt 3500 ]]; then
         log_warn "Düşük RAM tespit edildi: ${memory_mb}MB. 4GB öneriliyor."
-    else
+    elif [[ -n "$memory_mb" ]] && [[ "$memory_mb" =~ ^[0-9]+$ ]]; then
         log_success "RAM yeterli: ${memory_mb}MB"
+    else
+        log_warn "RAM bilgisi alınamadı: [$memory_mb]"
     fi
 
     # Disk alanı kontrolü
     local disk_available
-    disk_available=$(ssh_exec "df -h / | awk 'NR==2 {print \$4}'" false)
+    disk_available=$(ssh_exec 'df -h / | awk "NR==2 {print \$4}"' false)
     log_info "Mevcut disk alanı: $disk_available"
 }
 
@@ -308,7 +328,7 @@ install_system_packages() {
     # Temel paketler
     local packages=(
         "git" "python3" "python3-pip" "python3-venv"
-        "i2c-tools" "raspi-config"
+        "i2c-tools"
         "build-essential" "cmake" "pkg-config"
         "libjpeg-dev" "libtiff5-dev" "libpng-dev"
         "libavcodec-dev" "libavformat-dev" "libswscale-dev"
@@ -317,6 +337,23 @@ install_system_packages() {
         "libhdf5-dev" "libhdf5-serial-dev"
         "python3-dev"
     )
+
+    # Raspberry Pi ise raspi-config ekle
+    local os_info
+    os_info=$(ssh_exec "cat /etc/os-release | grep '^ID='" false false) || true
+    local pretty_name
+    pretty_name=$(ssh_exec "cat /etc/os-release | grep 'PRETTY_NAME'" false false) || true
+
+    log_debug "OS ID tespit ediliyor: [$os_info]"
+    log_debug "Pretty name: [$pretty_name]"
+
+    # Test Environment değil ve raspbian ise raspi-config ekle
+    if [[ "$os_info" == *"raspbian"* ]] && [[ "$pretty_name" != *"Test Environment"* ]]; then
+        packages+=("raspi-config")
+        log_debug "Gerçek Raspberry Pi tespit edildi, raspi-config eklendi"
+    else
+        log_debug "Test environment veya non-Raspbian sistem tespit edildi, raspi-config atlandı"
+    fi
 
     local package_list
     package_list=$(IFS=' '; echo "${packages[*]}")
@@ -354,16 +391,44 @@ configure_raspberry_pi() {
 
 # OBA projesini klonla ve kur
 install_oba_project() {
-    log_step "OBA projesi klonlanıyor..."
+    log_step "OBA projesi kopyalanıyor..."
 
     # Varolan oba klasörünü backup'la
     ssh_exec "if [ -d 'oba' ]; then mv oba oba_backup_\$(date +%Y%m%d_%H%M%S); fi"
 
-    # Projeyi klonla
-    ssh_exec "git clone -b $BRANCH $REPO_URL oba"
-    ssh_exec "cd oba && git log --oneline -1"
+    if [[ "$USE_SCP_COPY" == "true" ]]; then
+        log_info "SCP ile dosya kopyalama başlatıldı..."
 
-    log_success "Proje klonlandı"
+        local workspace_path="/workspaces/oba"
+        local temp_tar="/tmp/oba-project.tar.gz"
+        log_debug "PROJECT_ROOT değeri: [$PROJECT_ROOT]"
+        log_debug "Workspace path: [$workspace_path]"
+        log_debug "Workspace paketleniyor: $workspace_path -> $temp_tar"
+
+        tar -czf "$temp_tar" \
+            -C "$workspace_path" \
+            --exclude='.git' \
+            --exclude='__pycache__' \
+            --exclude='*.pyc' \
+            --exclude='temp/*' \
+            --exclude='logs/*' \
+            --exclude='venv' \
+            --exclude='.pytest_cache' \
+            --exclude='node_modules' \
+            .
+
+        scp_copy "$temp_tar" "/tmp/oba-project.tar.gz"
+        ssh_exec "mkdir -p oba"
+        ssh_exec "cd oba && tar -xzf /tmp/oba-project.tar.gz"
+        ssh_exec "rm -f /tmp/oba-project.tar.gz"
+        rm -f "$temp_tar"
+
+        log_success "Proje SCP ile kopyalandı"
+    else
+        ssh_exec "git clone -b $BRANCH $REPO_URL oba"
+        ssh_exec "cd oba && git log --oneline -1"
+        log_success "Proje git ile klonlandı"
+    fi
 
     log_step "Python environment kuruluyor..."
 
@@ -402,8 +467,10 @@ configure_oba() {
 install_systemd_service() {
     log_step "Systemd service kuruluyor..."
 
-    # Service dosyasını oluştur
-    local service_content="[Unit]
+    # Service dosyasını oluştur (temp file kullanarak)
+    local service_file="/tmp/oba-robot.service"
+    cat > "$service_file" << EOF
+[Unit]
 Description=OBA Autonomous Garden Robot
 After=network.target
 Wants=network.target
@@ -422,10 +489,13 @@ StandardOutput=journal
 StandardError=journal
 
 [Install]
-WantedBy=multi-user.target"
+WantedBy=multi-user.target
+EOF
 
-    # Service dosyasını yaz
-    ssh_exec "echo '$service_content' | sudo tee /etc/systemd/system/oba-robot.service"
+    # Service dosyasını kopyala ve kur
+    scp_copy "$service_file" "/tmp/oba-robot.service"
+    ssh_exec "sudo mv /tmp/oba-robot.service /etc/systemd/system/"
+    rm -f "$service_file"
 
     # Service'i aktifleştir
     ssh_exec "sudo systemctl daemon-reload"

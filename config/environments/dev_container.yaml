@@ -60,7 +60,7 @@ web_interface:
   enabled: true
   host: "0.0.0.0" # Dev container'da dışarıdan erişim
   port: 5000
-  debug: true
+  debug: false
   auto_reload: true
   cors_enabled: true
 

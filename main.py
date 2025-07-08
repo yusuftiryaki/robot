@@ -205,13 +205,7 @@ class RobotUygulama:
 
             # Config'ten web ayarlarını al
             config = config_manager.load_config()
-            web_config = config.get('web', {})
-
-            # Varsayılan değerlerle birleştir
-            web_config.setdefault('secret_key', 'oba_secret_2024')
-            web_config.setdefault('debug', False)  # Thread modunda ve web-only'de debug=False
-            web_config.setdefault('host', '0.0.0.0')
-            web_config.setdefault('port', 5000)
+            web_config = config.get('web_interface', {})
 
             self.web_server = WebArayuz(self.robot, web_config)
 

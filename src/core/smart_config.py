@@ -116,9 +116,7 @@ class SmartConfigManager:
             adaptations.update({
                 "simulation": {"enabled": True},
                 "motors": {"type": "simulation"},
-                "sensors": {"mock_enabled": True},
-                # "logging": {"level": "DEBUG"},  # Environment config'i override etme
-                "web_interface": {"debug": True}
+                "sensors": {"mock_enabled": True}
             })
 
         # Donanım modu adaptasyonları
