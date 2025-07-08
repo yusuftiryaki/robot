@@ -15,10 +15,33 @@ readonly RED='\033[0;31m'
 readonly BLUE='\033[0;34m'
 readonly NC='\033[0m'
 
+# Container ve port bilgileri
 CONTAINER_NAME="oba-test-pi"
 TEST_PORT=2222
 WEB_PORT=8080
 IMAGE_NAME="oba-test-pi"
+
+# Akıllı IP tespiti - Dev container içinde miyiz?
+detect_target_ip() {
+    # Dev container içinde mi kontrol et
+    if [ -n "${REMOTE_CONTAINERS}" ] || [ -n "${CODESPACES}" ] || [ -f "/.dockerenv" ]; then
+        # Dev container içindeyiz, host IP'sini bul
+        local host_ip
+        host_ip=$(ip route show default | awk '/default/ {print $3}')
+        if [ -n "$host_ip" ]; then
+            echo "$host_ip"
+        else
+            # Fallback: docker0 bridge gateway
+            echo "172.17.0.1"
+        fi
+    else
+        # Normal host ortamında localhost kullan
+        echo "localhost"
+    fi
+}
+
+# Global değişken olarak target IP'yi ayarla
+TARGET_IP=$(detect_target_ip)
 
 show_help() {
     echo -e "${CYAN}"
@@ -164,9 +187,9 @@ start_container() {
     echo ""
     echo -e "${CYAN}📋 BAĞLANTI BİLGİLERİ${NC}"
     echo "=========================="
-    echo -e "${GREEN}📡 SSH:${NC} ssh -p $TEST_PORT pi@localhost"
+    echo -e "${GREEN}📡 SSH:${NC} ssh -p $TEST_PORT pi@$TARGET_IP"
     echo -e "${GREEN}🔑 Şifre:${NC} raspberry"
-    echo -e "${GREEN}🌐 Web:${NC} http://localhost:$WEB_PORT"
+    echo -e "${GREEN}🌐 Web:${NC} http://$TARGET_IP:$WEB_PORT"
     echo -e "${GREEN}👤 Kullanıcı:${NC} pi"
     echo ""
     echo -e "${YELLOW}💡 Test komutları:${NC}"
@@ -210,7 +233,7 @@ ssh_to_container() {
 
     log_info "SSH bağlantısı kuruluyor..."
     echo -e "${YELLOW}Şifre: raspberry${NC}"
-    ssh -p "$TEST_PORT" -o StrictHostKeyChecking=no pi@localhost
+    ssh -p "$TEST_PORT" -o StrictHostKeyChecking=no pi@$TARGET_IP
 }
 
 test_deployment() {
@@ -224,20 +247,20 @@ test_deployment() {
 
     # Git repository URL'yi güncelle (deployment script'te)
     local temp_script="/tmp/oba-deploy-test"
-    sed "s|https://github.com/your-repo/oba.git|file:///host-project|g" \
+    sed "s|https://github.com/yusuftiryaki/robot.git|file:///host-project|g" \
         "$SCRIPT_DIR/oba-deploy" > "$temp_script"
     chmod +x "$temp_script"
 
     # Test deployment'ı çalıştır
     echo -e "${CYAN}🧪 Test parametreleri:${NC}"
-    echo "  IP: localhost"
+    echo "  IP: $TARGET_IP"
     echo "  Port: $TEST_PORT"
     echo "  User: pi"
     echo "  Password: raspberry"
     echo ""
 
     "$temp_script" \
-        --ip localhost \
+        --ip $TARGET_IP \
         --port "$TEST_PORT" \
         --user pi \
         --password raspberry \
@@ -266,7 +289,7 @@ quick_test() {
 
     # Otomatik cevaplar için expect benzeri yaklaşım
     {
-        echo "localhost"           # IP
+        echo "$TARGET_IP"         # IP
         echo "raspberry"          # Password
         echo "pi"                 # User
         echo "y"                  # Skip update
@@ -288,7 +311,7 @@ validate_deployment() {
     log_step "Deployment validation..."
 
     "$SCRIPT_DIR/oba-test-deployment" \
-        --ip localhost \
+        --ip $TARGET_IP \
         --port "$TEST_PORT" \
         --user pi \
         --password raspberry
@@ -308,8 +331,8 @@ show_status() {
 
         echo ""
         echo -e "${CYAN}📡 Bağlantı bilgileri:${NC}"
-        echo "  SSH: ssh -p $TEST_PORT pi@localhost"
-        echo "  Web: http://localhost:$WEB_PORT"
+        echo "  SSH: ssh -p $TEST_PORT pi@$TARGET_IP"
+        echo "  Web: http://$TARGET_IP:$WEB_PORT"
         echo "  Şifre: raspberry"
 
         echo ""

@@ -17,8 +17,6 @@ RUN apt-get update && apt-get install -y \
     python3 \
     python3-pip \
     python3-venv \
-    systemd \
-    systemctl \
     i2c-tools \
     nano \
     net-tools \
@@ -61,11 +59,12 @@ RUN sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/
     sed -i 's/#PubkeyAuthentication yes/PubkeyAuthentication yes/' /etc/ssh/sshd_config
 
 # GPIO gruplarını simüle et (Raspberry Pi uyumluluğu için)
-RUN groupadd gpio && \
-    groupadd i2c && \
-    groupadd spi && \
-    groupadd video && \
-    groupadd input && \
+# Mevcut grupları kontrol et ve yoksa oluştur
+RUN groupadd -f gpio && \
+    groupadd -f i2c && \
+    groupadd -f spi && \
+    groupadd -f video && \
+    groupadd -f input && \
     usermod -aG gpio,i2c,spi,video,input pi
 
 # Raspberry Pi benzeri /dev dosyaları oluştur
@@ -88,9 +87,6 @@ RUN echo 'PRETTY_NAME="Raspberry Pi OS Lite (Test Environment)"' > /etc/os-relea
 
 # SSH anahtarı oluştur
 RUN ssh-keygen -A
-
-# Systemd için gerekli ayarlar
-RUN systemctl enable ssh
 
 # Test için port'ları expose et
 EXPOSE 22 8080

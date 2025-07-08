@@ -2,14 +2,17 @@
 
 echo "🤖 Hacı Abi'nin Bahçe Robotu Development Environment Kuruluyor..."
 
-# Python paketecho "✅ OBA Helper Scripts yüklendi!"
-echo "   oba-help    - Yardım ve komut listesi"
-echo "   oba-start   - Robot başlat"
-echo "   oba-stop    - Robot durdur"
-echo "   oba-test    - Test suite çalıştır"
-echo "   oba-status  - Robot durumu kontrol"
-echo "   oba-logs    - Log dosyalarını görüntüle"
-echo "   oba-clean   - Geçici dosyaları temizle"yükle
+#!/bin/bash
+
+echo "🤖 Hacı Abi'nin Bahçe Robotu Development Environment Kuruluyor..."
+
+# Sistem paketlerini güncelle ve sshpass kur
+echo "📦 Sistem paketleri güncelleniyor..."
+sudo apt update
+sudo apt install -y sshpass
+echo "✅ sshpass kuruldu!"
+
+# Python paketlerini yükle
 pip install --upgrade pip
 
 # Requirements.txt'ten paketleri yükle (tek kaynak, düzenli yaklaşım)
