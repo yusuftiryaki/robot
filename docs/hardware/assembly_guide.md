@@ -15,7 +15,7 @@
 ### Sensörler
 - [ ] MPU6050 IMU Sensörü
 - [ ] NEO-8M GPS Modülü
-- [ ] HC-SR04 Ultrasonik Sensör (x6)
+- [ ] Encoder sensörleri (mevcut motorlardan)
 - [ ] Raspberry Pi Camera V2
 - [ ] Mikroswitch Tampon Sensörü (x4)
 - [ ] INA219 Güç Monitör Sensörü 🆕
@@ -427,7 +427,7 @@ echo "Robotu eğimli yüzeye koy"
 echo "Batarya voltajını düşür ve uyarıları kontrol et"
 
 # 5. Engel Algılama Testi
-echo "Ultrasonik sensörler önüne engel koy"
+echo "Kamera ile engel tespit sistemini test et"
 ```
 
 ## 📊 PERFORMANS BEKLENTİLERİ
@@ -442,7 +442,7 @@ echo "Ultrasonik sensörler önüne engel koy"
 - **GPS hassasiyeti**: ±2-3 metre
 - **IMU çözünürlüğü**: 0.1° açısal
 - **Kamera çözünürlüğü**: 1920x1080 @ 30fps
-- **Engel tespiti**: Kamera tabanlı computer vision
+- **Engel tespiti**: Kamera tabanlı computer vision + encoder odometri
 
 ### Sistemik Performans
 - **Boot zamanı**: ~30 saniye

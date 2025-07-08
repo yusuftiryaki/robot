@@ -222,7 +222,7 @@
    - Su ile yıka ve kurula
 
 2. 🔍 Sensörleri kontrol et:
-   - Ultrasonik sensörlerde kir/böcek var mı?
+   - Encoder sensörlerde problem var mı?
    - Kamera lensini yumuşak bezle sil
    - Tampon sensörleri test et
 

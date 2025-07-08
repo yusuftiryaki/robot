@@ -40,10 +40,10 @@
                          │ GPIO12(Pin32)───┼─── TAMPON_3
                          │ GPIO13(Pin33)───┼─── TAMPON_4
                          │ GND   (Pin34)───┼─── GND BUS
-                         │ GPIO19(Pin35)───┼─── ULTRA_TRIG_1
-                         │ GPIO16(Pin36)───┼─── ULTRA_ECHO_1
-                         │ GPIO26(Pin37)───┼─── ULTRA_TRIG_2
-                         │ GPIO20(Pin38)───┼─── ULTRA_ECHO_2
+                         │ GPIO19(Pin35)───┼─── ENC_SOL_A
+                         │ GPIO16(Pin36)───┼─── ENC_SOL_B
+                         │ GPIO26(Pin37)───┼─── ENC_SAG_A
+                         │ GPIO20(Pin38)───┼─── ENC_SAG_B
                          │ GND   (Pin39)───┼─── GND BUS
                          │ GPIO21(Pin40)───┼─── BUZZER
                          └─────────────────┘
@@ -156,7 +156,7 @@ Resolution: 1920x1080 @ 30fps
                          │ 12V→5V  │     │
                          └─────────┘     ├─── GPS Modülü
                                          │
-                                         ├─── Ultrasonik Sensörler
+                                         ├─── Encoder Sensörleri
                                          │
                                          └─── Fan Motor
 
@@ -175,7 +175,7 @@ Resolution: 1920x1080 @ 30fps
 - Motor Sürücü: 12V @ 5A peak (60W)
 - IMU Sensörü: 3.3V @ 5mA (0.016W)
 - GPS Modülü: 5V @ 50mA (0.25W)
-- Ultrasonik (x6): 5V @ 15mA each (0.45W)
+- Encoder (x2): 3.3V @ 5mA each (0.033W)
 - Kamera: 5V @ 250mA (1.25W)
 - **Toplam: ~75W peak**
 
@@ -190,7 +190,7 @@ Resolution: 1920x1080 @ 30fps
 ┌─────────────────────────────────────────┐
 │  🎥              KAMERA                 │
 ├─────────────────────────────────────────┤
-│  📏 ULTRA_1  📏 ULTRA_2  📏 ULTRA_3     │
+│  � KAMERA    � ENC_SOL    � ENC_SAG     │
 ├─────────────────────────────────────────┤
 │                                         │
 │    🧭 IMU        📍 GPS                 │
@@ -269,6 +269,36 @@ raspistill -o test.jpg
 ```bash
 # GPS sinyal kontrol
 cat /dev/ttyAMA0
+```
+
+## 🔄 ENCODER SENSÖRLERI BAĞLANTISI
+
+```
+    RASPBERRY PI 4              ENCODER SENSÖRLERI
+
+GPIO19 (Pin35) ─────────────────┤ SOL_ENCODER_A
+GPIO16 (Pin36) ─────────────────┤ SOL_ENCODER_B
+GPIO26 (Pin37) ─────────────────┤ SAG_ENCODER_A
+GPIO20 (Pin38) ─────────────────┤ SAG_ENCODER_B
+
+3.3V (Pin1) ────────────────────┤ ENCODER_VCC
+GND (Pin39) ────────────────────┤ ENCODER_GND
+```
+
+**Encoder Özellikleri:**
+- **Çözünürlük**: 360 pulse/devir
+- **Çıkış**: Quadrature (A/B kanalı)
+- **Voltaj**: 3.3V TTL
+- **Akım**: 5mA per encoder
+- **Frekans**: Max 100kHz
+
+**Encoder Faydaları:**
+```
+✅ Hassas odometri (±1mm)
+✅ Gerçek zamanlı hız kontrolü
+✅ Slip detection (kayma tespiti)
+✅ GPS-independent navigation
+✅ Kalman filter entegrasyonu
 ```
 
 Bu diyagram robotun tüm elektronik bağlantılarını göstermektedir. Her bağlantı öncesinde mutlaka pin numaralarını kontrol ediniz!

@@ -115,12 +115,12 @@ bahce_robotu/
 ## 🛠 Özellikler
 
 ### ✅ Tamamlanan Özellikler
-- **Ataletli Seyrüsefer**: Enkoder + IMU + GPS füzyonu ile konum takibi
+- **Ataletli Seyrüsefer**: Encoder + IMU + GPS füzyonu ile hassas konum takibi
 - **Gelişmiş Odometri**: Kalman filtresi ile sensör verilerinin birleştirilmesi
 - **Otonom Görev Yönetimi**: Biçerdöver metodu ile sistematik alan tarama
 - **Otonom Şarj Sistemi**: Batarya izleme ve otomatik şarj istasyonu docking
 - **Güvenlik Katmanları**: Acil stop, tampon sensörleri, eğim koruması
-- **Kamera Tabanlı Algılama**: OpenCV ile engel tanıma ve şarj istasyonu tespiti
+- **Kamera Tabanlı Algılama**: OpenCV ile engel tanıma ve encoder destekli hassas hareket
 - **Web Arayüzü**: Mobile-first tasarımla uzaktan kontrol ve izleme
 - **Dev Container Ortamı**: Hızlı geliştirme için hazır geliştirme ortamı
 

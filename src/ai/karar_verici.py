@@ -201,22 +201,24 @@ class KararVerici:
 
     async def _guvenlik_analizi(self, sensor_data: Dict[str, Any], kamera_data: Dict[str, Any]) -> Optional[KararSonucu]:
         """🛡️ Güvenlik analizi"""
-        # Ultrasonik sensör verileri
-        ultrasonik_data = sensor_data.get("ultrasonik", {})
-        if ultrasonik_data:
-            on_mesafe = ultrasonik_data.get("front", float('inf'))
+        # Kamera tabanlı engel tespiti (ultrasonik sensörler yerine)
+        # Ultrasonik sensörler kaldırıldı, sadece kamera kullanılıyor
+        kamera_engel_data = kamera_data.get("engeller", [])
+        if kamera_engel_data:
+            # En yakın engeli bul
+            en_yakin_engel = min(kamera_engel_data, key=lambda e: e.get("mesafe", float('inf')))
+            on_mesafe = en_yakin_engel.get("mesafe", float('inf'))
 
             if on_mesafe < self.guvenlik_mesafesi:
-                # Kaçınma yönü belirle
-                sol_mesafe = ultrasonik_data.get("left", float('inf'))
-                sag_mesafe = ultrasonik_data.get("right", float('inf'))
-
-                if sol_mesafe > sag_mesafe:
-                    angular_hiz = 0.5  # Sola dön
-                    yon = "sola"
+                # Engel tipine göre kaçış stratejisi
+                if en_yakin_engel.get("tip") == "insan":
+                    # İnsan varsa dur ve bekle
+                    angular_hiz = 0.0
+                    yon = "dur"
                 else:
-                    angular_hiz = -0.5  # Sağa dön
-                    yon = "saga"
+                    # Diğer engeller için rastgele kaçış (ultrasonik yan sensörleri olmadığı için)
+                    angular_hiz = 0.3 if self.son_karar_zamani % 2 == 0 else -0.3
+                    yon = "saga" if angular_hiz > 0 else "sola"
 
                 return KararSonucu(
                     hareket={"linear": 0.0, "angular": angular_hiz},

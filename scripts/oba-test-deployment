@@ -107,6 +107,15 @@ test_deployment() {
 
     echo ""
 
+    # Encoder/Donanım testleri
+    echo -e "${YELLOW}🔄 ENCODER VE DONANIM TESTLERİ${NC}"
+    run_test "GPIO Erişimi" "cd oba && source venv/bin/activate && python -c 'import RPi.GPIO; print(\"GPIO OK\")'" "$pi_ip" "$pi_user" "$pi_password" "$pi_port"
+    run_test "I2C Cihazları" "i2cdetect -y 1 | grep UU" "$pi_ip" "$pi_user" "$pi_password" "$pi_port"
+    run_test "Encoder Config" "cd oba && grep -q 'encoders:' config/robot_config.yaml" "$pi_ip" "$pi_user" "$pi_password" "$pi_port"
+    run_test "Sensor Okuyucu" "cd oba && source venv/bin/activate && python -c 'from src.hardware.sensor_okuyucu import SensorOkuyucu; print(\"Sensor OK\")'" "$pi_ip" "$pi_user" "$pi_password" "$pi_port"
+
+    echo ""
+
     # Sonuçları göster
     echo -e "${CYAN}📊 TEST SONUÇLARI${NC}"
     echo "================="
@@ -163,6 +172,7 @@ TEST KATEGORİLERİ:
     🚀 Servis Testleri
     🌐 Web Interface Testleri
     🐍 Python Modül Testleri
+    🔄 Encoder ve Donanım Testleri
 
 Hacı Abi'nin test aracı! 🧪
 EOF

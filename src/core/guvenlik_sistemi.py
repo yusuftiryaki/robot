@@ -113,9 +113,9 @@ class GuvenlikSistemi:
         if egim_kontrolu.acil_durum:
             return egim_kontrolu
 
-        # Engel mesafe kontrolü (ultrasonik sensörler devre dışı)
+        # Engel mesafe kontrolü (kamera tabanlı)
         # Engel tespiti artık sadece kamera ile yapılıyor
-        engel_kontrolu = self._engel_mesafe_kontrol({})
+        engel_kontrolu = self._engel_mesafe_kontrol(sensor_data)
 
         # Batarya güvenlik kontrolü
         batarya_kontrolu = self._batarya_guvenlik_kontrol(sensor_data.get("batarya", {}))
@@ -189,14 +189,37 @@ class GuvenlikSistemi:
             detaylar={"roll": roll, "pitch": pitch}
         )
 
-    def _engel_mesafe_kontrol(self, ultrasonik_data: Dict[str, Any]) -> GuvenlikDurumu:
-        """📏 Engel mesafe kontrolü - Ultrasonik sensörler devre dışı, kameraya güveniliyor"""
-        # Ultrasonik sensörler kullanılmıyor, güvenli durumu dön
+    def _engel_mesafe_kontrol(self, sensor_data: Dict[str, Any]) -> GuvenlikDurumu:
+        """📏 Engel mesafe kontrolü - Kamera tabanlı engel tespiti"""
+        # Kamera verilerini kontrol et
+        kamera_data = sensor_data.get("kamera", {})
+        if kamera_data:
+            engeller = kamera_data.get("engeller", [])
+            if engeller:
+                # En yakın engeli bul
+                en_yakin_mesafe = min(engel.get("mesafe", float('inf')) for engel in engeller)
+
+                if en_yakin_mesafe < 0.3:  # 30cm'den yakın
+                    return GuvenlikDurumu(
+                        seviye=GuvenlikSeviyesi.ACIL_DURUM,
+                        acil_durum=True,
+                        sebep=f"Kritik engel mesafesi: {en_yakin_mesafe:.2f}m",
+                        detaylar={"kamera_engel_mesafesi": en_yakin_mesafe}
+                    )
+                elif en_yakin_mesafe < 0.5:  # 50cm'den yakın
+                    return GuvenlikDurumu(
+                        seviye=GuvenlikSeviyesi.TEHLIKE,
+                        acil_durum=False,
+                        sebep=f"Engel yakın: {en_yakin_mesafe:.2f}m",
+                        detaylar={"kamera_engel_mesafesi": en_yakin_mesafe}
+                    )
+
+        # Kamera ile engel tespit edilmezse güvenli
         return GuvenlikDurumu(
             seviye=GuvenlikSeviyesi.GUVENLI,
             acil_durum=False,
-            sebep="Ultrasonik sensörler devre dışı - sadece kamera ile engel tespiti",
-            detaylar={"ultrasonic_disabled": True}
+            sebep="Kamera ile engel tespit edilmedi",
+            detaylar={"kamera_engel_tespiti": False}
         )
 
     def _batarya_guvenlik_kontrol(self, batarya_data: Dict[str, Any]) -> GuvenlikDurumu:

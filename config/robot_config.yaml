@@ -55,6 +55,17 @@ hardware:
       pin: 16
       pull_up: true
 
+    # Encoder sensörleri (tekerlek motorlarından)
+    encoders:
+      sol_encoder:
+        pin_a: 19  # GPIO19 - Sol tekerlek encoder A kanalı
+        pin_b: 16  # GPIO16 - Sol tekerlek encoder B kanalı
+        pulses_per_revolution: 360  # Xiaomi motor encoder çözünürlüğü
+      sag_encoder:
+        pin_a: 26  # GPIO26 - Sağ tekerlek encoder A kanalı
+        pin_b: 20  # GPIO20 - Sağ tekerlek encoder B kanalı
+        pulses_per_revolution: 360  # Xiaomi motor encoder çözünürlüğü
+
     ina219:
       i2c_address: 0x40
       sda_pin: 2
@@ -149,7 +160,7 @@ web_interface:
   host: "0.0.0.0"
   port: 5000
   secret_key: "haci_abi_secret_2024"
-  
+
 # Güvenlik
 safety:
   emergency_stop_pin: 17

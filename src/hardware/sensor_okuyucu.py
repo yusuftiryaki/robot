@@ -7,7 +7,7 @@ Bu sınıf robot'un tüm sensörlerini okur:
 - GPS NEO-6M
 - INA219 akım/voltaj sensörü
 - Ön tampon sensörü
-- Ultrasonik sensörler
+- Encoder sensörleri (odometri için)
 """
 
 import asyncio
@@ -379,7 +379,7 @@ class SensorOkuyucu:
         # Hataları logla
         for i, result in enumerate(results):
             if isinstance(result, Exception):
-                sensor_names = ["IMU", "GPS", "Batarya", "Tampon", "Ultrasonik"]
+                sensor_names = ["IMU", "GPS", "Batarya", "Tampon"]
                 self.logger.warning(f"⚠️ {sensor_names[i]} okuma hatası: {result}")
 
         return sensor_data
