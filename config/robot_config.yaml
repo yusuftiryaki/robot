@@ -1,184 +1,496 @@
-# OBA Konfigürasyon Dosyası
+# OBA Robot - Ana Konfigürasyon Dosyası (Modern Yapı)
+# Bu dosya, projenin temel ve varsayılan ayarlarını içerir.
+# raspberry_pi.yaml yapısı temel alınarak yeniden düzenlenmiştir.
+# Ortama özel ayarlar, 'environments' klasöründeki dosyalarla ezilir.
+
+# =====================================
+# ⚙️ TEMEL AYARLAR
+# =====================================
 robot:
-  name: "OBA_Bahce_Asistani"
+  name: "OBA Simülasyon"
   version: "1.0.0"
-  debug_mode: false
 
-# Hardware Pin Konfigürasyonları
-hardware:
-  motors:
-    left_wheel:
-      pin_a: 18
-      pin_b: 19
-      encoder_pin: 20
-      max_speed: 255
-    right_wheel:
-      pin_a: 21
-      pin_b: 22
-      encoder_pin: 23
-      max_speed: 255
-    main_brush:
-      pin_a: 24
-      pin_b: 25
-      max_speed: 200
-    side_brush_left:
-      pin_a: 26
-      pin_b: 27
-      max_speed: 150
-    side_brush_right:
-      pin_a: 5
-      pin_b: 6
-      max_speed: 150
-    fan:
-      pin_a: 12
-      pin_b: 13
-      max_speed: 180
+simulation:
+  enabled: true # Varsayılan olarak simülasyon aktif
+  real_time_factor: 1.0
 
-  sensors:
-    mpu6050:
-      i2c_address: 0x68
-      sda_pin: 2
-      scl_pin: 3
-      sample_rate: 50 # Hz
+# =====================================
+# 🚗 MOTOR KONTROLÜ
+# =====================================
+motors:
+  type: "simulation" # 'simulation' veya 'hardware'
+  driver: "l298n" # Varsayılan sürücü tipi
 
-    gps:
-      uart_tx: 14
-      uart_rx: 15
+  # L298N #1 - Tekerlek Motorları (Hareket)
+  wheels:
+    left:
+      # L298N #1 Motor A
+      pin_a: 7 # IN1
+      pin_b: 8 # IN2
+      pwm_pin: 18 # ENA (PWM)
+      enable_pin: 9 # Enable
+      encoder_pin_a: 2 # Encoder A
+      encoder_pin_b: 3 # Encoder B
+    right:
+      # L298N #1 Motor B
+      pin_a: 10 # IN3
+      pin_b: 11 # IN4
+      pwm_pin: 19 # ENB (PWM)
+      enable_pin: 13 # Enable
+      encoder_pin_a: 4 # Encoder A
+      encoder_pin_b: 5 # Encoder B
+
+  # L298N #2 - Yan Fırça Motorları
+  brushes:
+    side_right:
+      # L298N #2 Motor A
+      pin_a: 22 # IN1
+      pin_b: 23 # IN2
+      pwm_pin: 24 # ENA (PWM)
+      enable_pin: 25 # Enable
+    side_left:
+      # L298N #2 Motor B
+      pin_a: 20 # IN3
+      pin_b: 21 # IN4
+      pwm_pin: 26 # ENB (PWM)
+      enable_pin: 16 # Enable
+    main:
+      # L298N #3 Motor A (Ana fırça)
+      pin_a: 5 # IN1
+      pin_b: 6 # IN2
+      pwm_pin: 12 # ENA (PWM)
+      enable_pin: 17 # Enable
+
+  # Fan Motoru (L298N #3 Motor B)
+  fan:
+    pin_a: 27 # IN3
+    pin_b: 28 # IN4
+    pwm_pin: 13 # ENB (PWM)
+    enable_pin: 1 # Enable
+
+# =====================================
+# 📡 SENSÖRLER
+# =====================================
+sensors:
+  simulation_mode: true # Simülasyonda sensörler sahte veri üretir
+
+  # I2C sensörleri
+  i2c:
+    bus: 1 # Raspberry Pi'daki varsayılan I2C bus'ı
+    frequency: 100000
+    devices:
+      - type: "mpu6050"
+        address: 0x68
+        name: "main_imu"
+        enabled: true
+        update_rate: 100
+        calibration_samples: 100
+      - type: "ina219"
+        address: 0x40
+        name: "battery_monitor"
+        enabled: true
+        shunt_ohms: 0.1
+        max_expected_amps: 10.0
+        min_voltage: 10.5
+        max_voltage: 12.6
+        description: "Ana batarya seviye takibi"
+      - type: "ina219"
+        address: 0x41
+        name: "charging_monitor"
+        enabled: true
+        shunt_ohms: 0.1
+        max_expected_amps: 3.0
+        description: "Şarj istasyonu bağlantı kontrolü"
+
+  # GPIO tabanlı sensörler (butonlar, tamponlar vb.)
+  gpio:
+    mode: "BCM"
+    warnings: false
+    devices:
+      - type: "button"
+        pin: 15 # Emergency stop
+        name: "acil_durma"
+        enabled: true
+        pull_up: true
+      - type: "button"
+        pin: 14 # Front bumper
+        name: "tampon"
+        enabled: true
+        pull_up: true
+
+  # UART tabanlı sensörler (GPS vb.)
+  uart:
+    - type: "gps"
+      device: "/dev/serial0" # Pi'deki varsayılan UART portu
       baud_rate: 9600
+      name: "gps_module"
+      enabled: true
+      update_rate: 1
 
-    camera:
-      port: 0
-      resolution: [640, 480]
-      framerate: 30
+  # Encoder sensörleri (GPIO'da tanımlandı ama buraya da referans)
+  enkoder:
+    enabled: true
+    type: "rotary_encoder"
+    left_pin_a: 2 # wheels.left.encoder_pin_a ile aynı
+    left_pin_b: 3 # wheels.left.encoder_pin_b ile aynı
+    right_pin_a: 4 # wheels.right.encoder_pin_a ile aynı
+    right_pin_b: 5 # wheels.right.encoder_pin_b ile aynı
+    pulse_per_revolution: 1000
 
-    front_bumper:
-      pin: 16
-      pull_up: true
+# =====================================
+# 📷 KAMERA
+# =====================================
+camera:
+  enabled: true
+  type: "simulation" # 'simulation' veya 'hardware'
+  device: "/dev/video0" # Linux kamera aygıtı
+  width: 640
+  height: 480
+  fps: 30
 
-    # Encoder sensörleri (tekerlek motorlarından)
-    encoders:
-      sol_encoder:
-        pin_a: 19  # GPIO19 - Sol tekerlek encoder A kanalı
-        pin_b: 16  # GPIO16 - Sol tekerlek encoder B kanalı
-        pulses_per_revolution: 360  # Xiaomi motor encoder çözünürlüğü
-      sag_encoder:
-        pin_a: 26  # GPIO26 - Sağ tekerlek encoder A kanalı
-        pin_b: 20  # GPIO20 - Sağ tekerlek encoder B kanalı
-        pulses_per_revolution: 360  # Xiaomi motor encoder çözünürlüğü
+  # Simülasyon parametreleri - Engel tespit için optimize
+  simulation_params:
+    test_pattern: true
+    noise_level: 0.01 # Çok düşük noise - algoritmaları tetiklemesin
 
-    ina219:
-      i2c_address: 0x40
-      sda_pin: 2
-      scl_pin: 3
-
-# Navigasyon Ayarları
+# =====================================
+# 🧭 NAVİGASYON & LOKALİZASYON
+# =====================================
 navigation:
-  wheel_diameter: 0.065 # metre
-  wheel_base: 0.235 # metre (tekerlekler arası mesafe)
-  max_speed: 0.5 # m/s
-  max_angular_speed: 1.0 # rad/s
+  enabled: true
 
-  # Kalman Filter parametreleri
+  # 🚗 Robot Fiziksel Parametreleri
+  wheel_diameter: 0.065 # Tekerlek çapı (metre) - 6.5cm
+  wheel_base: 0.235 # Tekerlek arası mesafe (metre) - 23.5cm
+
+  # 🧮 Kalman Filtre Ayarları
   kalman:
-    process_noise: 0.1
-    measurement_noise: 0.5
+    process_noise: 0.1 # İşlem gürültüsü
+    measurement_noise: 0.5 # Ölçüm gürültüsü
 
-  # Path planning
+  # 🗺️ Rota Planlama Ayarları
   path_planning:
-    grid_resolution: 0.1 # metre
-    obstacle_padding: 0.2 # metre
+    grid_resolution: 0.5 # Grid çözünürlüğü (metre)
+    obstacle_padding: 0.2 # Engel etrafında güvenlik mesafesi (metre)
 
-# Görev Yönetimi
-missions:
-  mowing:
-    pattern: "boustrophedon" # biçerdöver metodu
-    overlap: 0.1 # metre
-    speed: 0.3 # m/s
+  # 🎯 Görev Ayarları
+  missions:
+    mowing:
+      overlap: 0.1 # Şeritler arası örtüşme mesafesi (metre)
+      speed: 0.3 # Biçme hızı (m/s)
+      brush_width: 0.25 # Fırça genişliği (metre)
 
-    # Bahçe sınır koordinatları (GPS lat/lon)
-    boundary_coordinates:
-      # Koordinatlar saat yönünde verilmeli (polygon için)
-      - latitude: 39.933500 # Kuzey-batı köşe
-        longitude: 32.859500
-      - latitude: 39.933600 # Kuzey-doğu köşe
-        longitude: 32.859900
-      - latitude: 39.933300 # Güney-doğu köşe
-        longitude: 32.859850
-      - latitude: 39.933200 # Güney-batı köşe
-        longitude: 32.859450
+  # 🔧 Akıllı Aksesuar Yönetimi
+  aksesuarlar:
+    # Karar verme parametreleri
+    min_bicme_hizi: 0.1 # Minimum biçme hızı (m/s)
+    max_yan_firca_hizi: 0.3 # Maksimum yan fırça hızı (m/s)
+    kritik_batarya: 20 # Kritik batarya seviyesi (%)
+    dusuk_batarya: 40 # Düşük batarya seviyesi (%)
+    guvenli_engel_mesafesi: 0.2 # Güvenli engel mesafesi (metre)
+    sinir_guvenlik_mesafesi: 1.0 # Sınır güvenlik mesafesi (metre)
 
-    # Güvenlik parametreleri
-    boundary_safety:
-      buffer_distance: 1.0 # metre - sınırdan ne kadar uzak durulsun
-      warning_distance: 2.0 # metre - uyarı mesafesi
-      max_deviation: 0.5 # metre - GPS hata toleransı
-      check_frequency: 10 # saniye - sınır kontrol sıklığı
+    # Varsayılan politika
+    default_policy: "performans" # performans, tasarruf, sessiz, guvenlik
 
-  charging:
-    battery_low_threshold: 20 # %
-    battery_full_threshold: 95 # %
-    dock_approach_speed: 0.1 # m/s
+    # Politika ayarları
+    policies:
+      performans:
+        description: "Maksimum temizlik performansı"
+        fan_always_on: true
+        aggressive_brushing: true
+      tasarruf:
+        description: "Enerji tasarrufu odaklı"
+        fan_minimal_use: true
+        conservative_brushing: true
+      sessiz:
+        description: "Gürültü minimizasyonu"
+        fan_disabled: true
+        quiet_operation: true
+      guvenlik:
+        description: "Güvenlik odaklı konservatif yaklaşım"
+        safety_first: true
+        reduced_speed_limit: 0.2
 
-    # Şarj istasyonu GPS koordinatları
-    dock_gps:
-      latitude: 39.933400 # Ankara Kızılay (örnek)
-      longitude: 32.859742
-      altitude: 850.0 # deniz seviyesinden yükseklik (metre)
-      accuracy_radius: 3.0 # GPS hata payı (metre)
+  # 🏡 Bahçe Sınır Kontrol Ayarları (18.000 m² = 150m x 120m)
+  boundary_coordinates:
+    - latitude: 41.008000
+      longitude: 28.978000
+    - latitude: 41.009080
+      longitude: 28.978000
+    - latitude: 41.009080
+      longitude: 28.980015
+    - latitude: 41.008000
+      longitude: 28.980015
 
-    # Şarj istasyonu yaklaşım parametreleri
-    approach:
-      gps_range: 10.0 # GPS ile 10m yaklaştığında kamera devreye girer
-      final_range: 2.0 # Son 2m kamera + sensörlerle
-      precision_range: 0.5 # Son 50cm hassas yerleştirme
+  boundary_safety:
+    buffer_distance: 1.0 # Güvenlik buffer mesafesi (metre)
+    warning_distance: 2.0 # Uyarı mesafesi (metre)
+    max_deviation: 0.5 # Maksimum sapma toleransı (metre)
+    check_frequency: 10 # Kontrol sıklığı (saniye)
 
-    # AprilTag destekli hassas yaklaşım
-    apriltag:
-      sarj_istasyonu_tag_id: 0 # Şarj istasyonu AprilTag ID'si
-      tag_boyutu: 0.08 # AprilTag boyutu (metre) - 8cm (küçük)
-      hedef_mesafe: 0.25 # Hedef mesafe (metre) - 25cm
-      hassas_mesafe: 0.08 # Hassas mesafe (metre) - 8cm
-      aci_toleransi: 5.0 # Açı toleransı (derece)
-      pozisyon_toleransi: 0.02 # Pozisyon toleransı (metre) - 2cm
-      yaklasim_hizi: 0.1 # Yaklaşım hızı (m/s)
-      hassas_hiz: 0.02 # Hassas hız (m/s)
-      donme_hizi: 0.2 # Dönme hızı (rad/s)
+# =====================================
+# 🔋 ŞARJ SİSTEMİ
+# =====================================
+charging:
+  enabled: true
 
-      # Kamera kalibrasyonu (örnek değerler - kalibrasyon gerekli)
-      kamera_matrix:
-        - [640, 0, 320]
-        - [0, 640, 240]
-        - [0, 0, 1]
-      distortion_coeffs: [0, 0, 0, 0, 0] # Distortion coefficients
+  # 🌍 GPS Şarj İstasyonu Ayarları
+  gps_dock:
+    latitude: 41.008150
+    longitude: 28.978550
+    accuracy_radius: 3.0
 
-      # INA219 güç sensörü parametreleri
-      sarj_akimi_esigi: 0.1 # Şarj akımı eşiği (Amper)
-      baglanti_voltaj_esigi: 11.0 # Bağlantı voltaj eşiği (Volt)
+    # 🎯 Yaklaşım Mesafe Eşikleri
+    precise_approach_distance: 0.5
+    medium_distance_threshold: 10.0
+    apriltag_detection_range: 0.5
 
-# Web Arayüzü
+    # ⚡ Yaklaşım Hızları
+    approach_speeds:
+      normal: 0.3
+      slow: 0.2
+      very_slow: 0.1
+      ultra_slow: 0.05
+      precise: 0.02
+
+  # 🏷️ AprilTag Şarj İstasyonu Parametreleri
+  apriltag:
+    enabled: true
+    sarj_istasyonu_tag_id: 0
+    tag_boyutu: 0.08
+
+    # 📷 Kamera Kalibrasyonu
+    kamera_matrix:
+      - [640.0, 0.0, 320.0]
+      - [0.0, 640.0, 240.0]
+      - [0.0, 0.0, 1.0]
+
+    distortion_coeffs: [0.0, 0.0, 0.0, 0.0, 0.0]
+
+    # 🎯 Tespit Parametreleri
+    detection:
+      min_confidence: 0.5
+      max_detection_distance: 2.0
+      min_marker_perimeter_rate: 0.03
+      max_marker_perimeter_rate: 4.0
+
+    # 🎛️ Yaklaşım Toleransları
+    tolerances:
+      hedef_mesafe: 0.25
+      hassas_mesafe: 0.08
+      aci_toleransi: 5.0
+      pozisyon_toleransi: 0.02
+
+    # ⚡ Hız Ayarları
+    speeds:
+      yaklasim_hizi: 0.1
+      hassas_hiz: 0.02
+      donme_hizi: 0.2
+
+  # 🔌 INA219 Güç Sensörü (charging_monitor ile uyumlu)
+  power_sensor:
+    enabled: true
+    i2c_address: 0x41 # charging_monitor ile aynı
+    shunt_ohms: 0.1
+    sarj_akimi_esigi: 0.1
+    baglanti_voltaj_esigi: 11.0
+    description: "INA219 güç sensörü, şarj istasyonu bağlantı kontrolü"
+
+  # Geriye uyumluluk
+  station_apriltag_id: 0
+  voltage_threshold: 11.0
+
+# =====================================
+# 🌐 WEB ARAYÜZÜ
+# =====================================
 web_interface:
+  enabled: true
   host: "0.0.0.0"
   port: 5000
-  secret_key: "haci_abi_secret_2024"
+  cors_enabled: true
 
-# Güvenlik
-safety:
-  emergency_stop_pin: 17
-  max_tilt_angle: 30 # derece
-  obstacle_distance: 0.3 # metre
-  watchdog_timeout: 5 # saniye
-
-# Logging
+# =====================================
+# 📊 LOGLAMA
+# =====================================
 logging:
   level: "INFO"
   console:
     enabled: true
     colored: true
-    format: "%(asctime)s | %(name)s | %(levelname)s | %(message)s"
   file:
     enabled: true
-    path: "logs"
-    filename: "robot.log"
-    max_size: "10MB"
+    path: "logs/robot.log"
+    max_size: 10 # MB
     backup_count: 5
-    rotation: "size"
+
+# =====================================
+# 📁 VERİ YOLLARI
+# =====================================
+paths:
+  data: "data"
+  logs: "logs"
+  models: "models"
+  config: "config"
+  temp: "temp"
+
+# =====================================
+# ⚡ PERFORMANS
+# =====================================
+performance:
+  loop_frequency: 50 # Hz (development için)
+  max_linear_speed: 0.5 # m/s
+  max_angular_speed: 1.0 # rad/s
+
+# =====================================
+# 🛡️ GÜVENLİK
+# =====================================
+safety:
+  enabled: true
+
+  # 🚨 ACİL DURUM YÖNETİMİ
+  emergency_management:
+    enabled: true
+    auto_recovery: false
+    emergency_stop_button:
+      enabled: true
+      require_manual_reset: true
+
+  # 📐 EĞİM KONTROLÜ
+  tilt_control:
+    enabled: true
+    max_tilt_angle: 30
+    warning_threshold: 0.7
+    rapid_change_threshold: 10
+
+  # 🔋 BATARYA GÜVENLİĞİ
+  battery_safety:
+    enabled: true
+    min_battery_voltage: 10.0
+    rapid_drain_threshold: 5.0
+    max_current_draw: 5.0
+
+  # ⏰ WATCHDOG KONTROLÜ
+  watchdog:
+    enabled: true
+    timeout: 10.0
+
+  # 🛡️ ÇARPIŞMA TESPİTİ
+  collision_detection:
+    enabled: true
+    distance_threshold: 0.20 # 20 cm (simülasyon için)
+
+  # 📊 LOGLAMA
+  logging:
+    log_all_events: true
+    log_level: "INFO"
+
+# =====================================
+# 🎯 DİNAMİK ENGEL KAÇINMA (YENİ!)
+# =====================================
+dynamic_obstacle_avoidance:
+  enabled: true
+
+  # 🎯 Dynamic Window Approach (DWA) Parametreleri
+  dwa:
+    velocity_resolution: 0.05 # 5cm/s hız adımları
+    angular_resolution: 0.1 # 0.1 rad açısal adımlar
+    time_horizon: 2.0 # 2 saniye öngörü
+    dt: 0.1 # 100ms zaman adımı
+
+    # 🏆 Skor Ağırlıkları
+    weights:
+      heading: 1.0 # Hedefe yönelim
+      obstacle: 2.0 # Engelden kaçınma
+      velocity: 0.5 # Hız tercihi
+      smoothness: 0.3 # Yumuşak hareket
+
+  # 🤖 Robot Fiziksel Parametreleri
+  robot_physics:
+    radius: 0.3 # 30cm robot yarıçapı
+    max_linear_speed: 0.5 # m/s
+    max_angular_speed: 1.0 # rad/s
+    max_linear_accel: 0.5 # m/s²
+    max_angular_accel: 1.0 # rad/s²
+
+  # 🛡️ Güvenlik Parametreleri
+  safety:
+    safety_distance: 0.5 # 50cm güvenlik mesafesi
+    lookahead_distance: 2.0 # 2m öngörü mesafesi
+    emergency_brake_distance: 0.8 # 80cm acil fren mesafesi
+    obstacle_timeout: 5.0 # 5s engel timeout
+
+  # 🔍 Engel Tespit Sistemi (Kamera Odaklı)
+  obstacle_detection:
+    # � Kamera Tabanlı Tespit (Ana Sistem)
+    camera:
+      enabled: true
+      fov: 60 # 60° görüş açısı
+      range: 4.0 # 4m menzil (ultrasonik olmadığı için artırıldı)
+      height: 0.2 # 20cm kamera yüksekliği
+      min_object_size: 0.05 # 5cm minimum engel boyutu (daha hassas)
+      max_object_size: 3.0 # 3m maksimum engel boyutu (artırıldı)
+      detection_threshold: 0.6 # %60 güven seviyesi (biraz düşürüldü)
+
+      # 🎯 Gelişmiş Computer Vision Parametreleri
+      edge_detection:
+        enabled: true
+        canny_lower: 50 # Canny edge detection alt eşik
+        canny_upper: 150 # Canny edge detection üst eşik
+        blur_kernel: 5 # Gaussian blur kernel boyutu
+
+      depth_estimation:
+        enabled: true
+        baseline: 0.1 # Mono kamera için yaklaşık baseline
+        focal_length: 640.0 # Kamera focal length (piksel)
+
+      object_tracking:
+        enabled: true
+        max_tracking_distance: 1.0 # 1m maksimum takip mesafesi
+        tracking_history: 5 # 5 frame geçmiş
+
+      # 🚨 Acil Durum Tespiti
+      emergency_detection:
+        close_range_threshold: 0.5 # 50cm yakın mesafe acil durumu
+        rapid_approach_speed: 0.3 # 30cm/s hızla yaklaşan objeler
+
+    # 🔄 Kamera Tabanlı Çoklu Tespit
+    multi_detection:
+      enabled: true
+      confidence_boost: 0.2 # Çoklu tespit güven artışı
+      temporal_filtering: true # Zaman bazlı filtreleme
+      spatial_clustering: true # Mekansal kümeleme
+
+  # 🎛️ Navigasyon Modları
+  navigation_modes:
+    normal:
+      speed_factor: 1.0 # Normal hız çarpanı
+      safety_factor: 1.0 # Normal güvenlik
+
+    conservative:
+      speed_factor: 0.5 # Yarı hız
+      safety_factor: 1.5 # %50 fazla güvenlik
+
+    aggressive:
+      speed_factor: 1.2 # %20 daha hızlı
+      safety_factor: 0.8 # %20 daha az güvenlik
+
+    emergency:
+      speed_factor: 0.0 # Dur
+      safety_factor: 2.0 # Maksimum güvenlik
+
+  # ⚡ Performans Ayarları
+  performance:
+    max_replanning_frequency: 2.0 # 2 Hz replanning
+    stuck_detection_limit: 20 # 20 döngü = ~10s
+    waypoint_tolerance: 0.3 # 30cm waypoint toleransı
+
+  # 🧪 Test ve Debug
+  debug:
+    enabled: false
+    visualization: false
+    log_trajectories: false
+    save_debug_data: false
+# =====================================
+# 🗺️ NAVİGASYON (GÜNCELLENDİ)
+# =====================================

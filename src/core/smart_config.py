@@ -5,13 +5,12 @@ Ortam Bazlı Akıllı Konfigürasyon Yöneticisi
 """
 
 import logging
-import os
 from pathlib import Path
 from typing import Any, Dict, Optional
 
 import yaml
 
-from .environment_manager import EnvironmentManager, EnvironmentType
+from .environment_manager import EnvironmentManager, HardwareCapability
 
 
 class SmartConfigManager:
@@ -130,8 +129,6 @@ class SmartConfigManager:
             })
 
         # Yetenek bazlı adaptasyonlar
-        from .environment_manager import HardwareCapability
-
         if not self.env_manager.has_capability(HardwareCapability.GPIO):
             adaptations.setdefault("motors", {})["type"] = "simulation"
             adaptations.setdefault("sensors", {})["gpio_based"] = False
@@ -149,39 +146,40 @@ class SmartConfigManager:
 
     def _merge_configs(self, *configs) -> Dict[str, Any]:
         """Birden fazla konfigürasyonu birleştir"""
-
+        self.logger.debug("Konfigürasyonlar birleştiriliyor...")
         merged = {}
 
-        for config in configs:
+        for i, config in enumerate(configs):
             if config:
+                self.logger.debug(f"Birleştirme adımı {i+1}: {list(config.keys())}")
                 self._deep_merge(merged, config)
 
+        self.logger.debug(f"Birleştirilmiş konfigürasyon anahtarları: {list(merged.keys())}")
         return merged
 
     def _deep_merge(self, target: Dict[str, Any], source: Dict[str, Any]):
         """Derin birleştirme (nested dict'ler için)"""
 
         for key, value in source.items():
-            if key in target:
-                if isinstance(target[key], dict) and isinstance(value, dict):
-                    self._deep_merge(target[key], value)
-                elif isinstance(target[key], list) and isinstance(value, list):
-                    # List'leri extend et
-                    target[key].extend(value)
-                else:
-                    # Override et
-                    target[key] = value
+            if key in target and isinstance(target[key], dict) and isinstance(value, dict):
+                self._deep_merge(target[key], value)
+            elif key in target and isinstance(target[key], list) and isinstance(value, list):
+                target[key].extend(value)
             else:
+                if key in target:
+                    self.logger.debug(f"'{key}' anahtarı üzerine yazılıyor.")
                 target[key] = value
 
     def _validate_config(self, config: Dict[str, Any]):
         """Konfigürasyonu validate et"""
-
-        required_sections = ["robot", "logging", "web_interface"]
+        self.logger.debug("Konfigürasyon doğrulanıyor...")
+        required_sections = ["robot", "logging", "web_interface", "motor", "sensors", "safety"]
 
         for section in required_sections:
             if section not in config:
-                self.logger.warning(f"⚠️ Eksik config bölümü: {section}")
+                self.logger.warning(f"⚠️ Eksik config bölümü: '{section}'")
+            else:
+                self.logger.debug(f"✅ '{section}' bölümü mevcut.")
 
         # Özel validasyonlar
         if config.get("simulation", {}).get("enabled") and config.get("motors", {}).get("type") == "hardware":

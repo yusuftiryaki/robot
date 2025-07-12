@@ -1,22 +1,21 @@
 """
 ⚙️ Motor Kontrolcüsü - Robot'un Kasları
-Hacı Abi'nin motor kontrolü burada!
+Hacı Abi'nin HAL pattern kullanarak temizlenmiş motor kontrolü!
 
-Bu sınıf robot'un tüm motorlarını kontrol eder:
-- Tekerlek motorları (hareket)
-- Ana fırça motoru
-- Yan fırça motorları
-- Fan motoru
-- Enkoder okuma ve hız kontrolü
+Bu sınıf HAL (Hardware Abstraction Layer) kullanarak robot'un motorlarını kontrol eder:
+- HAL pattern ile temiz mimari
+- Simülasyon/gerçek mod ayrımı HAL katmanında
+- SOLID prensiplerine uygun tasarım
+- Enkoder feedback ve kinematik hesaplamalar
 """
 
-import asyncio
 import logging
-import math
 import time
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Dict, Tuple
+
+from .hal.interfaces import MotorDurumuVeri, MotorInterface
 
 
 class MotorTipi(Enum):
@@ -47,467 +46,277 @@ class HareketKomut:
 
 class MotorKontrolcu:
     """
-    ⚙️ Ana Motor Kontrolcüsü
+    ⚙️ Ana Motor Kontrolcüsü - HAL Pattern
 
-    Robot'un tüm motorlarını kontrol eden sınıf.
-    PWM ile hız kontrolü yapar ve enkoder feedback'i alır.
+    HAL (Hardware Abstraction Layer) kullanarak robot'un tüm motorlarını kontrol eder.
+    Simülasyon/gerçek mod ayrımı HAL katmanında yapılır.
     """
 
-    def __init__(self, motor_config: Dict[str, Any]):
+    def __init__(self, motor_hal: MotorInterface, motor_config: Dict[str, Any]):
+        """
+        MotorKontrolcu sınıfının başlatıcısı.
+
+        Args:
+            motor_hal (MotorInterface): Motor HAL implementasyonu (gerçek veya simülasyon)
+            motor_config (Dict[str, Any]): Motor ayarlarını içeren konfigürasyon.
+        """
+        self.logger = logging.getLogger(self.__class__.__name__)
+        self.motor_hal = motor_hal
         self.config = motor_config
-        self.logger = logging.getLogger("MotorKontrolcu")
-
-        # Simülasyon modu kontrolü - hemen başta set et
-        self.simulation_mode = self._is_simulation()
-
-        # Motor durumları
-        self.motorlar_aktif = False
-        self.mevcut_hizlar = {"sol": 0.0, "sag": 0.0}
-        self.enkoder_sayaclari = {"sol": 0, "sag": 0}
-        self.firca_durumu = {"ana": False, "sol": False, "sag": False}
-        self.fan_durumu = False
-
-        # PID kontrolcü parametreleri
-        self.pid_kp = 1.0
-        self.pid_ki = 0.1
-        self.pid_kd = 0.05
-        self.pid_hata_integral = {"sol": 0.0, "sag": 0.0}
-        self.pid_onceki_hata = {"sol": 0.0, "sag": 0.0}
 
         # Motor fizik parametreleri
-        self.tekerlek_capi = 0.065  # metre
-        self.tekerlek_base = 0.235  # metre
-        self.enkoder_pulse_per_rev = 360
+        self.tekerlek_capi = self.config.get("wheel_diameter", 0.065)  # metre
+        self.tekerlek_base = self.config.get("wheel_base", 0.235)  # metre
+        self.enkoder_pulse_per_rev = self.config.get("encoder_pulses_per_rev", 360)
+        self.max_hiz = self.config.get("max_linear_speed", 0.5)  # m/s
 
         # Log throttle mekanizması - spam önleme
         self.log_throttle_interval = 5.0  # saniye
         self.last_log_times = {
-            "firca_start": 0.0,
-            "firca_stop": 0.0
+            "hareket": 0.0,
+            "firca": 0.0,
+            "aksesuar": 0.0
         }
 
-        self.logger.info(f"⚙️ Motor kontrolcü başlatıldı (Simülasyon: {self.simulation_mode})")
-        self._init_motors()
+        self.logger.info(f"⚙️ Motor kontrolcü başlatıldı (HAL: {type(motor_hal).__name__})")
 
-    def _should_log(self, log_key: str) -> bool:
+    async def baslat(self) -> bool:
+        """Motor sistemini başlat"""
+        try:
+            success = await self.motor_hal.baslat()
+            if success:
+                self.logger.info("✅ Motor kontrolcü başarıyla başlatıldı")
+            else:
+                self.logger.error("❌ Motor kontrolcü başlatılamadı")
+            return success
+        except Exception as e:
+            self.logger.error(f"Motor kontrolcü başlatma hatası: {e}")
+            return False
+
+    async def hareket_et(self, linear_hiz: float, angular_hiz: float):
         """
-        Log throttle kontrolü - belirlenen süre geçmişse log'a izin ver
+        Robotu belirtilen lineer ve angular hızda hareket ettirir.
 
         Args:
-            log_key: Log tipi anahtarı (firca_start, firca_stop, vs.)
+            linear_hiz (float): Lineer hız (m/s)
+            angular_hiz (float): Angular hız (rad/s)
+        """
+        try:
+            # Kinematik hesaplama
+            sol_hiz_ms, sag_hiz_ms = self._inverse_kinematics(linear_hiz, angular_hiz)
+
+            # Hızları normalize et (-1.0 ile 1.0 arasına)
+            sol_guc = sol_hiz_ms / self.max_hiz
+            sag_guc = sag_hiz_ms / self.max_hiz
+
+            # Güvenlik sınırları
+            sol_guc = max(-1.0, min(1.0, sol_guc))
+            sag_guc = max(-1.0, min(1.0, sag_guc))
+
+            # HAL'e gönder
+            await self.motor_hal.tekerlek_hiz_ayarla(sol_guc, sag_guc)
+
+            # Throttled logging
+            if self._should_log("hareket"):
+                self.logger.debug(f"Hareket: Linear={linear_hiz:.2f} m/s, Angular={angular_hiz:.2f} rad/s")
+                self.logger.debug(f"Tekerlek güçleri: Sol={sol_guc:.2f}, Sağ={sag_guc:.2f}")
+
+        except Exception as e:
+            self.logger.error(f"Hareket komutu hatası: {e}")
+
+    async def acil_durdur(self):
+        """
+        🚨 Tüm motorları anında durdurur.
+        """
+        try:
+            self.logger.critical("🚨 ACİL DURDURMA! Tüm motorlar durduruluyor.")
+            await self.motor_hal.acil_durdur()
+            self.logger.info("✅ Tüm motorlar güvenli bir şekilde durduruldu.")
+        except Exception as e:
+            self.logger.error(f"Acil durdurma hatası: {e}")
+
+    async def firca_kontrol(self, ana: bool | None = None, sol: bool | None = None, sag: bool | None = None):
+        """
+        Fırça motorlarını kontrol eder.
+
+        Args:
+            ana (bool, optional): Ana fırça durumu
+            sol (bool, optional): Sol fırça durumu
+            sag (bool, optional): Sağ fırça durumu
+        """
+        try:
+            # Mevcut durumu al
+            current_state = self.motor_hal.motor_durumu_al()
+
+            # None değerleri mevcut durumla doldur
+            ana = ana if ana is not None else current_state.ana_firca
+            sol = sol if sol is not None else current_state.sol_firca
+            sag = sag if sag is not None else current_state.sag_firca
+
+            await self.motor_hal.firca_kontrol(ana, sol, sag)
+
+            if self._should_log("firca"):
+                self.logger.info(f"Fırça durumları: Ana={ana}, Sol={sol}, Sağ={sag}")
+
+        except Exception as e:
+            self.logger.error(f"Fırça kontrol hatası: {e}")
+
+    async def fan_kontrol(self, aktif: bool):
+        """Fan motorunu kontrol eder."""
+        try:
+            await self.motor_hal.fan_kontrol(aktif)
+            self.logger.info(f"Fan {'açıldı' if aktif else 'kapandı'}")
+        except Exception as e:
+            self.logger.error(f"Fan kontrol hatası: {e}")
+
+    async def aksesuarlari_kontrol_et(self, aksesuar_komutlari: Dict[str, bool]):
+        """
+        AI karar verici'den gelen aksesuar komutlarını uygula.
+
+        Args:
+            aksesuar_komutlari (Dict[str, bool]): Aksesuar komutları
+                - "ana_firca": Ana fırça durumu
+                - "yan_firca": Yan fırçalar durumu (sol ve sağ)
+                - "fan": Fan durumu
+        """
+        try:
+            # Ana fırça kontrolü
+            if "ana_firca" in aksesuar_komutlari:
+                ana_firca = aksesuar_komutlari["ana_firca"]
+                # Yan fırça kontrolü - tek parametre ile her ikisini kontrol et
+                yan_firca = aksesuar_komutlari.get("yan_firca", False)
+
+                await self.firca_kontrol(ana=ana_firca, sol=yan_firca, sag=yan_firca)
+
+            # Fan kontrolü
+            if "fan" in aksesuar_komutlari:
+                fan_aktif = aksesuar_komutlari["fan"]
+                await self.fan_kontrol(fan_aktif)
+
+            # Debug log
+            if self._should_log("aksesuar"):
+                aktif_aksesuarlar = [k for k, v in aksesuar_komutlari.items() if v]
+                if aktif_aksesuarlar:
+                    self.logger.debug(f"Aktif aksesuarlar: {', '.join(aktif_aksesuarlar)}")
+                else:
+                    self.logger.debug("Tüm aksesuarlar kapalı")
+
+        except Exception as e:
+            self.logger.error(f"Aksesuar kontrol hatası: {e}")
+
+    def motor_durumu_al(self) -> MotorDurumuVeri:
+        """Mevcut motor durumunu al"""
+        motor_durumu = self.motor_hal.motor_durumu_al()
+        motor_durumu.dogrusal_hiz, motor_durumu.acisal_hiz = self.mevcut_hiz_hesapla()
+        motor_durumu.saglikli = self.motor_hal.saglikli_mi()
+        self.logger.debug(f"Motor durumu alındı: {motor_durumu}")
+        return motor_durumu
+
+    def saglikli_mi(self) -> bool:
+        """Motor sistemi sağlıklı mı?"""
+        return self.motor_hal.saglikli_mi()
+
+    def _inverse_kinematics(self, linear_hiz: float, angular_hiz: float) -> tuple[float, float]:
+        """
+        Verilen lineer ve angular hızdan tekerlek hızlarını hesaplar.
+
+        Args:
+            linear_hiz (float): Lineer hız (m/s)
+            angular_hiz (float): Angular hız (rad/s)
 
         Returns:
-            True: Log'a izin ver
-            False: Log'ı atla (spam önleme)
+            tuple[float, float]: (sol_tekerlek_hiz, sag_tekerlek_hiz) m/s cinsinden
         """
-        current_time = time.time()
-        last_log_time = self.last_log_times.get(log_key, 0.0)
+        # Diferansiyel sürüş kinematiği
+        # v_left = v - (w * L / 2)
+        # v_right = v + (w * L / 2)
+        L = self.tekerlek_base
 
-        if current_time - last_log_time >= self.log_throttle_interval:
-            self.last_log_times[log_key] = current_time
+        v_sol = linear_hiz - (angular_hiz * L / 2.0)
+        v_sag = linear_hiz + (angular_hiz * L / 2.0)
+
+        return v_sol, v_sag
+
+    def mevcut_hiz_hesapla(self) -> Tuple[float, float]:
+        """
+        🚀 Robot'un mevcut doğrusal ve açısal hızını hesapla
+
+        Encoder verileri ve motor komutlarını kullanarak gerçek hızları hesaplar.
+        Bu DWA algoritması için kritik!
+
+        Returns:
+            Tuple[float, float]: (doğrusal_hız_m/s, açısal_hız_rad/s)
+        """
+        try:
+            if not self.motor_hal:
+                self.logger.warning("⚠️ Motor HAL mevcut değil, hız hesaplanamıyor")
+                return (0.0, 0.0)
+
+            # Motor durumunu al
+            motor_durum = self.motor_hal.motor_durumu_al()
+
+            # Motor güçlerini m/s'ye çevir (-1.0/1.0 → gerçek hız)
+            sol_hiz_ms = motor_durum.sol_hiz * self.max_hiz  # m/s
+            sag_hiz_ms = motor_durum.sag_hiz * self.max_hiz  # m/s
+
+            # Forward kinematics - tekerlek hızlarından robot hızlarına
+            dogrusal_hiz, acisal_hiz = self._forward_kinematics(sol_hiz_ms, sag_hiz_ms)
+
+            # Debug için throttled logging
+            if self._should_log("hiz_hesaplama"):
+                self.logger.debug(f"🚀 Mevcut hızlar: linear={dogrusal_hiz:.3f} m/s, "
+                                  f"angular={acisal_hiz:.3f} rad/s")
+                self.logger.debug(f"   Tekerlek hızları: sol={sol_hiz_ms:.3f}, sağ={sag_hiz_ms:.3f}")
+
+            return (dogrusal_hiz, acisal_hiz)
+
+        except Exception as e:
+            self.logger.error(f"❌ Hız hesaplama hatası: {e}")
+            return (0.0, 0.0)
+
+    def _forward_kinematics(self, sol_hiz_ms: float, sag_hiz_ms: float) -> Tuple[float, float]:
+        """
+        🔄 Forward Kinematics - Tekerlek hızlarından robot hızlarına
+
+        Args:
+            sol_hiz_ms: Sol tekerlek hızı (m/s)
+            sag_hiz_ms: Sağ tekerlek hızı (m/s)
+
+        Returns:
+            Tuple[float, float]: (doğrusal_hız, açısal_hız)
+        """
+        # Diferansiyel sürüş forward kinematiği
+        # v = (v_left + v_right) / 2
+        # w = (v_right - v_left) / L
+
+        dogrusal_hiz = (sol_hiz_ms + sag_hiz_ms) / 2.0
+        acisal_hiz = (sag_hiz_ms - sol_hiz_ms) / self.tekerlek_base
+
+        return (dogrusal_hiz, acisal_hiz)
+
+    def _should_log(self, key: str) -> bool:
+        """Log spam'ini önlemek için kullanılır."""
+        current_time = time.time()
+        if current_time - self.last_log_times.get(key, 0) > self.log_throttle_interval:
+            self.last_log_times[key] = current_time
             return True
         return False
 
-    def _is_simulation(self) -> bool:
-        """Simülasyon modunda mı kontrol et"""
+    async def temizle(self):
+        """Motor kontrolcüyü temizler ve kaynakları serbest bırakır."""
         try:
-            import RPi.GPIO
-            return False
-        except (ImportError, RuntimeError):
-            # ImportError: paket yok
-            # RuntimeError: "This module can only be run on a Raspberry Pi!"
-            return True
-
-    def _init_motors(self):
-        """Motorları başlat"""
-        if self.simulation_mode:
-            self._init_simulation_motors()
-        else:
-            self._init_real_motors()
-
-    def _init_simulation_motors(self):
-        """Simülasyon motorlarını başlat"""
-        self.logger.info("🔧 Simülasyon motorları başlatılıyor...")
-        # Simülasyon için sahte GPIO objesi
-        self.gpio_motors = {
-            "sol_tekerlek": {"pin_a": 18, "pin_b": 19, "pwm": None},
-            "sag_tekerlek": {"pin_a": 21, "pin_b": 22, "pwm": None},
-            "ana_firca": {"pin_a": 24, "pin_b": 25, "pwm": None},
-            "sol_firca": {"pin_a": 26, "pin_b": 27, "pwm": None},
-            "sag_firca": {"pin_a": 5, "pin_b": 6, "pwm": None},
-            "fan": {"pin_a": 12, "pin_b": 13, "pwm": None}
-        }
-        self.logger.info("✅ Simülasyon motorları hazır!")
-
-    def _init_real_motors(self):
-        """Gerçek motorları başlat"""
-        self.logger.info("🔧 Fiziksel motorlar başlatılıyor...")
-        try:
-            import RPi.GPIO as GPIO
-            from gpiozero import Motor, PWMOutputDevice
-
-            GPIO.setmode(GPIO.BCM)
-
-            # Config'ten motor ayarlarını al
-            left_config = self.config.get("left_wheel", {})
-            right_config = self.config.get("right_wheel", {})
-            main_brush_config = self.config.get("main_brush", {})
-            side_left_config = self.config.get("side_brush_left", {})
-            side_right_config = self.config.get("side_brush_right", {})
-            fan_config = self.config.get("fan", {})
-
-            # Motor hız limitleri
-            self.motor_limits = {
-                "left_wheel": left_config.get("max_speed", 255),
-                "right_wheel": right_config.get("max_speed", 255),
-                "main_brush": main_brush_config.get("max_speed", 200),
-                "side_brush_left": side_left_config.get("max_speed", 150),
-                "side_brush_right": side_right_config.get("max_speed", 150),
-                "fan": fan_config.get("max_speed", 180)
-            }
-
-            # Tekerlek motorları
-            self.sol_motor = Motor(
-                forward=left_config.get("pin_a", 18),
-                backward=left_config.get("pin_b", 19)
-            )
-            self.sag_motor = Motor(
-                forward=right_config.get("pin_a", 21),
-                backward=right_config.get("pin_b", 22)
-            )
-
-            # Fırça motorları
-            self.ana_firca_motor = Motor(
-                forward=main_brush_config.get("pin_a", 24),
-                backward=main_brush_config.get("pin_b", 25)
-            )
-            self.sol_firca_motor = Motor(
-                forward=side_left_config.get("pin_a", 26),
-                backward=side_left_config.get("pin_b", 27)
-            )
-            self.sag_firca_motor = Motor(
-                forward=side_right_config.get("pin_a", 5),
-                backward=side_right_config.get("pin_b", 6)
-            )
-
-            # Fan motoru
-            self.fan_motor = Motor(
-                forward=fan_config.get("pin_a", 12),
-                backward=fan_config.get("pin_b", 13)
-            )
-
-            # Enkoder pinleri ve interrupt'lar
-            self.sol_enkoder_pin = left_config.get("encoder_pin", 20)
-            self.sag_enkoder_pin = right_config.get("encoder_pin", 23)
-
-            GPIO.setup(self.sol_enkoder_pin, GPIO.IN, pull_up_down=GPIO.PUD_UP)
-            GPIO.setup(self.sag_enkoder_pin, GPIO.IN, pull_up_down=GPIO.PUD_UP)
-
-            # Enkoder interrupt'larını ayarla
-            GPIO.add_event_detect(self.sol_enkoder_pin, GPIO.RISING, callback=self._sol_enkoder_callback)
-            GPIO.add_event_detect(self.sag_enkoder_pin, GPIO.RISING, callback=self._sag_enkoder_callback)
-
-            self.logger.info("✅ Fiziksel motorlar hazır!")
-            self.logger.info(f"📊 Motor limitleri: {self.motor_limits}")
-            self.logger.info(f"🔧 Enkoder pinleri: Sol-{self.sol_enkoder_pin}, Sağ-{self.sag_enkoder_pin}")
-
+            self.logger.info("Motor kontrolcü temizleniyor...")
+            await self.motor_hal.durdur()
+            self.logger.info("✅ Motor kontrolcü başarıyla temizlendi.")
         except Exception as e:
-            self.logger.error(f"❌ Motor başlatma hatası: {e}")
-            self.simulation_mode = True
-            self._init_simulation_motors()
-
-    def _sol_enkoder_callback(self, channel):
-        """Sol tekerlek enkoder callback"""
-        self.enkoder_sayaclari["sol"] += 1
-
-    def _sag_enkoder_callback(self, channel):
-        """Sağ tekerlek enkoder callback"""
-        self.enkoder_sayaclari["sag"] += 1
-
-    async def hareket_uygula(self, hareket: HareketKomut):
-        """
-        🚶 Ana hareket uygulama fonksiyonu
-
-        Linear ve angular hızları tekerlek hızlarına çevirir
-        """
-        # Kinematik hesaplama - differential drive
-        sol_hiz, sag_hiz = self._kinematik_hesapla(hareket.linear_hiz, hareket.angular_hiz)
-
-        self.logger.debug(f"🚶 Hareket: linear={hareket.linear_hiz:.2f}m/s, angular={hareket.angular_hiz:.2f}rad/s")
-        self.logger.debug(f"⚙️ Tekerlek hızları: sol={sol_hiz:.2f}, sag={sag_hiz:.2f}")
-
-        # Mevcut hızları güncelle - robot durumu takibi için
-        self.mevcut_hizlar["linear"] = hareket.linear_hiz
-        self.mevcut_hizlar["angular"] = hareket.angular_hiz
-        self.mevcut_hizlar["sol"] = sol_hiz
-        self.mevcut_hizlar["sag"] = sag_hiz
-
-        # Motor hızlarını uygula
-        await self._tekerlek_hizlarini_ayarla(sol_hiz, sag_hiz)
-
-        # Belirli süre hareket et
-        if hareket.sure > 0:
-            await asyncio.sleep(hareket.sure)
-            await self.durdur()
-
-    def _kinematik_hesapla(self, linear_hiz: float, angular_hiz: float) -> Tuple[float, float]:
-        """
-        🧮 Differential drive kinematik hesaplama
-
-        Linear ve angular hızları sol/sağ tekerlek hızlarına çevirir
-        """
-        # v_sol = v - (ω * L) / 2
-        # v_sag = v + (ω * L) / 2
-        # v: linear hız, ω: angular hız, L: tekerlek base
-
-        sol_hiz_ms = linear_hiz - (angular_hiz * self.tekerlek_base) / 2
-        sag_hiz_ms = linear_hiz + (angular_hiz * self.tekerlek_base) / 2
-
-        # m/s'yi PWM değerine çevir (-1.0 ile 1.0 arası)
-        max_hiz = 0.5  # maksimum hız m/s
-        sol_pwm = max(-1.0, min(1.0, sol_hiz_ms / max_hiz))
-        sag_pwm = max(-1.0, min(1.0, sag_hiz_ms / max_hiz))
-
-        return sol_pwm, sag_pwm
-
-    async def _tekerlek_hizlarini_ayarla(self, sol_hiz: float, sag_hiz: float):
-        """Tekerlek motorlarının hızını ayarla"""
-        self.mevcut_hizlar["sol"] = sol_hiz
-        self.mevcut_hizlar["sag"] = sag_hiz
-
-        if self.simulation_mode:
-            await self._simulation_motor_control(sol_hiz, sag_hiz)
-        else:
-            await self._real_motor_control(sol_hiz, sag_hiz)
-
-    async def _simulation_motor_control(self, sol_hiz: float, sag_hiz: float):
-        """Simülasyon motor kontrolü"""
-        # Simülasyon enkoder değerlerini güncelle
-        dt = 0.1  # 100ms
-        sol_rpm = sol_hiz * 60 / (math.pi * self.tekerlek_capi)
-        sag_rpm = sag_hiz * 60 / (math.pi * self.tekerlek_capi)
-
-        sol_pulse_per_sec = (sol_rpm / 60) * self.enkoder_pulse_per_rev
-        sag_pulse_per_sec = (sag_rpm / 60) * self.enkoder_pulse_per_rev
-
-        self.enkoder_sayaclari["sol"] += int(sol_pulse_per_sec * dt)
-        self.enkoder_sayaclari["sag"] += int(sag_pulse_per_sec * dt)
-
-        self.logger.debug(f"🎮 Simülasyon motor: sol={sol_hiz:.2f}, sag={sag_hiz:.2f}")
-
-    async def _real_motor_control(self, sol_hiz: float, sag_hiz: float):
-        """Gerçek motor kontrolü - Config'ten max_speed'i kullan"""
-        # Hız değerlerini motor limitlerinde tut ve int'e çevir
-        left_limit = self.motor_limits.get("left_wheel", 255)
-        right_limit = self.motor_limits.get("right_wheel", 255)
-
-        # Hızları PWM değerlerine dönüştür (0-1 range -> 0-max_speed)
-        sol_pwm = int(abs(sol_hiz) * left_limit)
-        sag_pwm = int(abs(sag_hiz) * right_limit)
-
-        # Sol motor
-        if sol_hiz > 0:
-            self.sol_motor.forward(sol_pwm)
-        elif sol_hiz < 0:
-            self.sol_motor.backward(sol_pwm)
-        else:
-            self.sol_motor.stop()
-
-        # Sağ motor
-        if sag_hiz > 0:
-            self.sag_motor.forward(sag_pwm)
-        elif sag_hiz < 0:
-            self.sag_motor.backward(sag_pwm)
-        else:
-            self.sag_motor.stop()
-
-    async def fircalari_calistir(self, aktif: bool, ana: bool = True, yan: bool = True):
-        """
-        🌪️ Fırçaları çalıştır/durdur
-
-        Args:
-            aktif: Fırçalar çalışsın mı?
-            ana: Ana fırça dahil mi?
-            yan: Yan fırçalar dahil mi?
-        """
-        if aktif:
-            # Log throttle - sadece 5 saniyede bir defa logla
-            if self._should_log("firca_start"):
-                self.logger.info("🌪️ Fırçalar çalıştırılıyor...")
-
-            if ana:
-                self.firca_durumu["ana"] = True
-                await self._ana_firca_calistir(True)
-
-            if yan:
-                self.firca_durumu["sol"] = True
-                self.firca_durumu["sag"] = True
-                await self._yan_fircalari_calistir(True)
-        else:
-            # Log throttle - sadece 5 saniyede bir defa logla
-            if self._should_log("firca_stop"):
-                self.logger.info("⏸️ Fırçalar durduruluyor...")
-
-            self.firca_durumu = {"ana": False, "sol": False, "sag": False}
-            await self._ana_firca_calistir(False)
-            await self._yan_fircalari_calistir(False)
-
-    async def _ana_firca_calistir(self, aktif: bool):
-        """Ana fırçayı çalıştır/durdur - Config'ten max_speed kullan"""
-        if self.simulation_mode:
-            self.logger.debug(f"🎮 Ana fırça simülasyon: {aktif}")
-        else:
-            if aktif:
-                main_brush_speed = int(self.motor_limits.get("main_brush", 200) * 0.8)  # %80 hız
-                self.ana_firca_motor.forward(main_brush_speed)
-            else:
-                self.ana_firca_motor.stop()
-
-    async def _yan_fircalari_calistir(self, aktif: bool):
-        """Yan fırçaları çalıştır/durdur - Config'ten max_speed kullan"""
-        if self.simulation_mode:
-            self.logger.debug(f"🎮 Yan fırçalar simülasyon: {aktif}")
-        else:
-            if aktif:
-                side_left_speed = int(self.motor_limits.get("side_brush_left", 150) * 0.6)  # %60 hız
-                side_right_speed = int(self.motor_limits.get("side_brush_right", 150) * 0.6)  # %60 hız
-                self.sol_firca_motor.forward(side_left_speed)
-                self.sag_firca_motor.forward(side_right_speed)
-            else:
-                self.sol_firca_motor.stop()
-                self.sag_firca_motor.stop()
-
-    async def fan_calistir(self, aktif: bool):
-        """🌬️ Fan'ı çalıştır/durdur - Config'ten max_speed kullan"""
-        self.fan_durumu = aktif
-
-        if self.simulation_mode:
-            self.logger.debug(f"🎮 Fan simülasyon: {aktif}")
-        else:
-            if aktif:
-                fan_speed = int(self.motor_limits.get("fan", 180) * 0.7)  # %70 hız
-                self.fan_motor.forward(fan_speed)
-            else:
-                self.fan_motor.stop()
-
-        self.logger.info(f"🌬️ Fan {'çalıştırıldı' if aktif else 'durduruldu'}")
-
-    async def durdur(self):
-        """🛑 Tüm motorları durdur"""
-        self.logger.info("🛑 Tüm motorlar durduruluyor...")
-
-        await self._tekerlek_hizlarini_ayarla(0.0, 0.0)
-        await self.fircalari_calistir(False)
-        await self.fan_calistir(False)
-
-        # Mevcut hızları sıfırla
-        self.mevcut_hizlar["linear"] = 0.0
-        self.mevcut_hizlar["angular"] = 0.0
-        self.mevcut_hizlar["sol"] = 0.0
-        self.mevcut_hizlar["sag"] = 0.0
-
-        self.motorlar_aktif = False
-        self.logger.info("✅ Tüm motorlar durduruldu")
-
-    async def acil_durdur(self):
-        """🚨 Acil durdurma - hemen durdur"""
-        self.logger.warning("🚨 ACİL DURDURMA!")
-
-        if not self.simulation_mode:
-            try:
-                self.sol_motor.stop()
-                self.sag_motor.stop()
-                self.ana_firca_motor.stop()
-                self.sol_firca_motor.stop()
-                self.sag_firca_motor.stop()
-                self.fan_motor.stop()
-            except Exception as e:
-                self.logger.error(f"❌ Acil durdurma hatası: {e}")
-
-        self.motorlar_aktif = False
-        self.mevcut_hizlar = {"sol": 0.0, "sag": 0.0}
-        self.firca_durumu = {"ana": False, "sol": False, "sag": False}
-        self.fan_durumu = False
-
-    async def test_et(self):
-        """🧪 Motor test fonksiyonu"""
-        self.logger.info("🧪 Motor testleri başlatılıyor...")
-
-        try:
-            # İleri hareket testi
-            self.logger.info("➡️ İleri hareket testi...")
-            await self.hareket_uygula(HareketKomut(linear_hiz=0.1, angular_hiz=0.0, sure=1.0))
-
-            # Geri hareket testi
-            self.logger.info("⬅️ Geri hareket testi...")
-            await self.hareket_uygula(HareketKomut(linear_hiz=-0.1, angular_hiz=0.0, sure=1.0))
-
-            # Dönme testi
-            self.logger.info("🔄 Dönme testi...")
-            await self.hareket_uygula(HareketKomut(linear_hiz=0.0, angular_hiz=0.5, sure=1.0))
-
-            # Fırça testi
-            self.logger.info("🌪️ Fırça testi...")
-            await self.fircalari_calistir(True)
-            await asyncio.sleep(2.0)
-            await self.fircalari_calistir(False)
-
-            # Fan testi
-            self.logger.info("🌬️ Fan testi...")
-            await self.fan_calistir(True)
-            await asyncio.sleep(2.0)
-            await self.fan_calistir(False)
-
-            self.logger.info("✅ Tüm motor testleri başarılı!")
-            return True
-
-        except Exception as e:
-            self.logger.error(f"❌ Motor test hatası: {e}")
-            return False
-
-    def get_enkoder_verileri(self) -> Dict[str, Any]:
-        """Enkoder verilerini al"""
-        return {
-            "sol_enkoder": self.enkoder_sayaclari["sol"],
-            "sag_enkoder": self.enkoder_sayaclari["sag"],
-            "sol_hiz": self.mevcut_hizlar["sol"],
-            "sag_hiz": self.mevcut_hizlar["sag"]
-        }
-
-    def enkoder_sifirla(self):
-        """Enkoder sayaçlarını sıfırla"""
-        self.enkoder_sayaclari = {"sol": 0, "sag": 0}
-        self.logger.info("🔄 Enkoder sayaçları sıfırlandı")
-
-    def get_current_speeds(self) -> Dict[str, float]:
-        """🏃 Mevcut hızları al - robot durumu için"""
-        return {
-            "linear": self.mevcut_hizlar.get("linear", 0.0),
-            "angular": self.mevcut_hizlar.get("angular", 0.0),
-            "left_wheel": self.mevcut_hizlar.get("sol", 0.0),
-            "right_wheel": self.mevcut_hizlar.get("sag", 0.0)
-        }
-
-    def get_motor_durumu(self) -> Dict[str, Any]:
-        """Motor durumu bilgisi"""
-        return {
-            "aktif": self.motorlar_aktif,
-            "hizlar": self.mevcut_hizlar.copy(),
-            "enkoder": self.enkoder_sayaclari.copy(),
-            "fircalar": self.firca_durumu.copy(),
-            "fan": self.fan_durumu,
-            "simulasyon": self.simulation_mode
-        }
+            self.logger.error(f"Motor kontrolcü temizleme hatası: {e}")
 
     def __del__(self):
-        """Motor kontrolcü kapatılıyor"""
-        if hasattr(self, 'logger'):
-            self.logger.info("👋 Motor kontrolcü kapatılıyor...")
-
-        # simulation_mode attribute'u varsa ve gerçek modda ise GPIO temizle
-        if hasattr(self, 'simulation_mode') and not self.simulation_mode:
-            try:
-                import RPi.GPIO as GPIO
-                GPIO.cleanup()
-            except Exception:
-                pass
+        """Destructor - async olmayan temizlik için"""
+        try:
+            # Sync cleanup attempt
+            if hasattr(self, 'motor_hal') and hasattr(self.motor_hal, 'motor_durumu_al'):
+                # HAL hala aktifse acil durdur
+                pass  # Async fonksiyon çağıramayız destructor'da
+        except Exception:
+            pass  # Destructor'da hata görmezden gel

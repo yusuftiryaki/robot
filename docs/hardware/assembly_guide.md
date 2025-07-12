@@ -627,22 +627,49 @@ Robot Tarafı:
    "
    ```
 
-### AŞAMA 10: Şarj İstasyonu Kalibrasyon
+### AŞAMA 10: Sistem Kalibrasyon
 
-#### 10.1 Kamera Kalibrasyonu
+#### 10.1 Encoder Kalibrasyonu
+
+**Encoder Mesafe ve Dönüş Kalibrasyonu:**
+```bash
+# İnteraktif encoder kalibrasyonu
+python scripts/encoder_calibration.py --interactive
+
+# Kalibrasyon menüsü:
+# 1. Mesafe Kalibrasyonu
+# 2. Dönüş Kalibrasyonu
+# 3. Konfigürasyon Güncelle
+# 4. Doğrulama Testi
+```
+
+**Encoder Kalibrasyon Sonuçları:**
+```yaml
+# config/robot_config.yaml güncellenir
+navigation:
+  wheel_diameter: 0.066    # Kalibre edilmiş değer
+  wheel_base: 0.238       # Kalibre edilmiş değer
+  calibration_factors:
+    distance_factor: 0.994
+    rotation_factor: 1.013
+```
+
+#### 10.2 Kamera Kalibrasyonu
 
 **Kamera Matrix Kalibrasyonu:**
 ```bash
-# Kalibrasyon scriptini çalıştır
-python scripts/camera_calibration.py
+# Tam kamera kalibrasyonu (görüntü toplama + kalibrasyon + test)
+python scripts/camera_calibration.py --tam
 
-# AprilTag detection için optimize et
-python scripts/apriltag_calibration.py --optimize-detection
+# Aşamalar:
+# 1. Chessboard görüntü toplama
+# 2. Kalibrasyon hesaplama
+# 3. AprilTag testi
 ```
 
-**Kalibrasyon Sonuçları:**
+**Kamera Kalibrasyon Sonuçları:**
 ```yaml
-# config/robot_config.yaml güncelle
+# config/robot_config.yaml güncellenir
 apriltag:
   kamera_matrix:
     - [fx, 0, cx]   # Focal length X, Center X

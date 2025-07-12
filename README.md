@@ -188,10 +188,19 @@ python tests/test_runner.py --verbose
 - **[Bağlantı Diyagramları](docs/hardware/wiring_diagram.md)**: Detaylı elektriksel şemalar
 - **[Montaj Rehberi](docs/hardware/assembly_guide.md)**: Adım adım kurulum talimatları
 
+### Kalibrasyon Dokümantasyonu
+- **[🔧 Kalibrasyon Rehberi](docs/calibration/README.md)**: Ana kalibrasyon dokümantasyonu
+- **[📏 Encoder Kalibrasyonu](docs/calibration/encoder_calibration_guide.md)**: Encoder kalibrasyon rehberi
+- **[📷 Kamera Kalibrasyonu](docs/calibration/camera_calibration_guide.md)**: Kamera kalibrasyon rehberi
+
 ### Kullanım Kılavuzları
 - **[User Manual](docs/user_manual.md)**: Kapsamlı kullanım kılavuzu
 - **[API Dokümantasyonu](docs/api.md)**: Web API referansı
 - **[Troubleshooting](docs/troubleshooting.md)**: Sorun giderme rehberi
+
+### Deployment Dokümantasyonu
+- **[🍓 Raspberry Pi Setup](docs/deployment/raspberry_pi_setup.md)**: Production kurulum rehberi
+- **[🏷️ AprilTag Placement Guide](docs/apriltag_placement_guide.md)**: AprilTag yerleştirme rehberi
 
 ## 🔧 Komut Satırı Araçları
 

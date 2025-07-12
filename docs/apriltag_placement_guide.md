@@ -134,9 +134,14 @@ apriltag:
 # Test scripti çalıştır
 python test_apriltag_system.py --test-detection
 
-# Kamera kalibrasyonu
-python scripts/camera_calibration.py
+# Kamera kalibrasyonu (TAM SÜREÇ)
+python scripts/camera_calibration.py --tam
+
+# Sadece kalibrasyon testi
+python scripts/camera_calibration.py --test
 ```
+
+📚 **Detaylı Kamera Kalibrasyon Rehberi**: [docs/calibration/camera_calibration_guide.md](calibration/camera_calibration_guide.md)
 
 ## 📱 Test Prosedürü
 

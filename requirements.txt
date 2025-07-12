@@ -17,9 +17,16 @@ opencv-contrib-python-headless==4.8.1.78 # AprilTag detection için
 Pillow==10.0.0                   # Basit resim işleme
 
 # =====================================
-# 🌐 WEB INTERFACE (Minimal)
+# 🌐 WEB INTERFACE (FastAPI Migration)
 # =====================================
-flask==2.3.2                    # Web framework (FastAPI yerine)
+fastapi==0.104.1                # Modern async web framework
+uvicorn[standard]==0.24.0        # ASGI server
+websockets==12.0                 # WebSocket support
+jinja2==3.1.2                   # Template engine
+python-multipart==0.0.6         # Form data support
+
+# Flask (backward compatibility - remove later)
+flask==2.3.2                    # Old web framework
 flask-socketio==5.3.5            # Real-time iletişim
 python-socketio==5.8.0           # Socket.IO server
 eventlet==0.33.3                 # Async networking

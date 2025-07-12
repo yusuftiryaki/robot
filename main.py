@@ -30,7 +30,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 
 from core.robot import BahceRobotu
 from core.smart_config import SmartConfigManager
-from web.web_server import WebArayuz
+from web.fastapi_server import FastAPIWebServer
 
 # Smart config'i ilk başta yükle
 config_manager = SmartConfigManager()
@@ -99,9 +99,14 @@ class RobotUygulama:
         self.debug = debug
         self.web_only = web_only
         self.robot: Optional[BahceRobotu] = None
-        self.web_server: Optional[WebArayuz] = None
-        self.web_thread = None
+        self.web_server: Optional[FastAPIWebServer] = None
         self.calisma_durumu = True
+        self.shutdown_event = asyncio.Event()
+
+        # Async task'ler için referans
+        self.fastapi_task: Optional[asyncio.Task] = None
+        self.robot_task: Optional[asyncio.Task] = None
+        self.uvicorn_server = None  # Uvicorn server referansı
 
         # Debug modunda log seviyesini artır
         if debug:
@@ -128,16 +133,18 @@ class RobotUygulama:
         # Robot'un da ana döngüsünü durdur
         if self.robot:
             self.robot.calisma_durumu = False
-            logger.info("🤖 Robot ana döngüsü durduruldu")
+            logger.info("🤖 Robot ana döngüsü durdurma sinyali gönderildi")
 
-        # Web server'ı da durdur
-        if self.web_server:
-            # Flask app'i durdurmak için calisma_durumu=False yap
-            # Thread join'i temizle() fonksiyonunda yapılacak
-            logger.info("🌐 Web sunucusu kapatılıyor...")
+        # Shutdown event'ini set et - Bu async task'lere signal verir
+        try:
+            # Event loop'ta shutdown event'ini set et
+            loop = asyncio.get_event_loop()
+            loop.call_soon_threadsafe(self.shutdown_event.set)
+            logger.info("📡 Async shutdown event gönderildi")
+        except RuntimeError:
+            logger.warning("⚠️ Event loop bulunamadı - shutdown event gönderilemedi")
 
-        # Ana döngüyü zorla bitir
-        logger.info("📱 Uygulama kapatılıyor...")
+        logger.info("📱 Signal handler tamamlandı - graceful shutdown başlayacak...")
 
     async def _show_smart_config_info(self):
         """Robot başladıktan sonra akıllı config bilgilerini göster"""
@@ -204,31 +211,84 @@ class RobotUygulama:
             logger.info("🌐 Web arayüzü başlatılıyor...")
 
             # Config'ten web ayarlarını al
-            config = config_manager.load_config()
-            web_config = config.get('web_interface', {})
+            current_config = config_manager.load_config()
+            web_config = current_config.get('web_interface', {})
 
-            self.web_server = WebArayuz(self.robot, web_config)
+            self.web_server = FastAPIWebServer(self.robot, web_config)
 
-            # Web sunucusunu thread'de başlat
-            import threading
-            self.web_thread = threading.Thread(
-                target=self.web_server.calistir,
-                daemon=False  # Graceful shutdown için daemon=False
-            )
-            self.web_thread.start()
-            logger.info("✅ Web sunucusu thread'de başlatıldı")
-
-            # Web sunucusunun başlatılmasını bekle
-            await asyncio.sleep(2)
+            # Pure Async Approach - FastAPI server'ı async olarak başlat
+            logger.info("🚀 FastAPI server async başlatılıyor...")
 
             if not self.web_only:
-                # Robot ana döngüsünü başlat
-                await self.robot_ana_dongasu()
+                # Robot + FastAPI server'ı parallel çalıştır
+                logger.info("🔄 Robot ve FastAPI server parallel başlatılıyor...")
+
+                # Task'leri ayrı ayrı oluştur (cancellation için)
+                self.fastapi_task = asyncio.create_task(
+                    self._fastapi_server_baslat(web_config),
+                    name="FastAPI-Server"
+                )
+                self.robot_task = asyncio.create_task(
+                    self.robot_ana_dongasu(),
+                    name="Robot-Ana-Dongu"
+                )
+
+                try:
+                    # Shutdown monitoring task'i de ekle
+                    shutdown_task = asyncio.create_task(
+                        self._shutdown_monitor(),
+                        name="Shutdown-Monitor"
+                    )
+
+                    # Task'leri parallel çalıştır ve shutdown'ı bekle
+                    done, pending = await asyncio.wait(
+                        [self.fastapi_task, self.robot_task, shutdown_task],
+                        return_when=asyncio.FIRST_COMPLETED
+                    )
+
+                    # Shutdown signal geldi mi kontrol et
+                    if shutdown_task in done:
+                        logger.info("🛑 Shutdown signal alındı - task'ler iptal ediliyor...")
+                        await self._graceful_task_cancellation([self.fastapi_task, self.robot_task])
+
+                except KeyboardInterrupt:
+                    logger.info("🛑 Ctrl+C alındı - graceful shutdown başlıyor...")
+                    await self._graceful_task_cancellation([self.fastapi_task, self.robot_task])
+                except asyncio.CancelledError:
+                    logger.info("🛑 Task'ler iptal edildi")
+
             else:
-                logger.info("📱 Sadece web arayüzü modu aktif")
-                # Ana döngü - signal handler'ları dinler
-                while self.calisma_durumu:
-                    await asyncio.sleep(1)
+                logger.info("📱 Sadece FastAPI server modu")
+
+                # Tek task için de aynı pattern
+                self.fastapi_task = asyncio.create_task(
+                    self._fastapi_server_baslat(web_config),
+                    name="FastAPI-Server-Only"
+                )
+
+                try:
+                    # Shutdown monitoring task'i ekle
+                    shutdown_task = asyncio.create_task(
+                        self._shutdown_monitor(),
+                        name="Shutdown-Monitor"
+                    )
+
+                    # Task'leri bekle
+                    done, pending = await asyncio.wait(
+                        [self.fastapi_task, shutdown_task],
+                        return_when=asyncio.FIRST_COMPLETED
+                    )
+
+                    # Shutdown signal geldi mi kontrol et
+                    if shutdown_task in done:
+                        logger.info("🛑 Shutdown signal alındı - FastAPI server iptal ediliyor...")
+                        await self._graceful_task_cancellation([self.fastapi_task])
+
+                except KeyboardInterrupt:
+                    logger.info("🛑 Ctrl+C alındı - FastAPI server iptal ediliyor...")
+                    await self._graceful_task_cancellation([self.fastapi_task])
+                except asyncio.CancelledError:
+                    logger.info("✅ FastAPI server iptal edildi")
 
         except KeyboardInterrupt:
             logger.info("👋 Kullanıcı tarafından durduruldu")
@@ -262,64 +322,165 @@ class RobotUygulama:
 
     async def temizle(self):
         """Uygulama sonlandırılırken temizlik işlemleri."""
-        logger.info("🧹 Temizlik işlemleri başlıyor...")
+        logger.info("🧹 Graceful shutdown - temizlik işlemleri başlıyor...")
 
         try:
-            # Robot sistemini temizle
+            # 1. Önce task'leri kontrol et ve graceful cancel et
+            active_tasks = []
+            if self.fastapi_task and not self.fastapi_task.done():
+                active_tasks.append(self.fastapi_task)
+            if self.robot_task and not self.robot_task.done():
+                active_tasks.append(self.robot_task)
+
+            if active_tasks:
+                logger.info(f"🔄 {len(active_tasks)} aktif task graceful olarak kapatılıyor...")
+                await self._graceful_task_cancellation(active_tasks, timeout=8.0)
+
+            # 2. FastAPI server'ı kapat
+            if self.uvicorn_server:
+                logger.info("🌐 Uvicorn server kapatılıyor...")
+                try:
+                    await asyncio.wait_for(
+                        self._shutdown_uvicorn_server(),
+                        timeout=5.0
+                    )
+                except asyncio.TimeoutError:
+                    logger.warning("⚠️ Uvicorn server timeout - force shutdown")
+                except Exception as e:
+                    logger.error(f"❌ Uvicorn server kapatma hatası: {e}")
+                finally:
+                    self.uvicorn_server = None
+
+            # 3. Robot sistemini temizle
             if self.robot:
                 logger.info("🤖 Robot sistemi temizleniyor...")
-                await self.robot.kapat()
-                self.robot = None
+                try:
+                    await asyncio.wait_for(
+                        self.robot.kapat(),
+                        timeout=5.0
+                    )
+                except asyncio.TimeoutError:
+                    logger.warning("⚠️ Robot kapatma timeout - acil durdur")
+                    # Sync method - acil durdur
+                    try:
+                        self.robot.acil_durdur()
+                    except Exception as e:
+                        logger.error(f"Acil durdur hatası: {e}")
+                except Exception as e:
+                    logger.error(f"❌ Robot kapatma hatası: {e}")
+                finally:
+                    self.robot = None
 
-            # Web sunucusunu temizle
+            # 4. Web server referansını temizle
             if self.web_server:
-                logger.info("🌐 Web sunucusu kapatılıyor...")
-                # WebArayuz'un kapat() metodunu kullan
-                self.web_server.kapat()
-
-                # Thread join'i ile bekle
-                if self.web_thread and self.web_thread.is_alive():
-                    logger.info("🌐 Web thread'i bekleniyor...")
-                    self.web_thread.join(timeout=5)  # 5 saniye bekle
-
-                    # Hala çalışıyorsa zorla kapat
-                    if self.web_thread.is_alive():
-                        logger.warning("⚠️ Web thread hala çalışıyor - zorla kapatılıyor")
-
-                        # Thread'i zorla sonlandır
-                        import ctypes
-
-                        # Thread ID'sini al
-                        thread_id = self.web_thread.ident
-                        if thread_id:
-                            try:
-                                # PyThreadState_SetAsyncExc ile thread'i sonlandır
-                                res = ctypes.pythonapi.PyThreadState_SetAsyncExc(
-                                    ctypes.c_long(thread_id),
-                                    ctypes.py_object(SystemExit)
-                                )
-                                if res == 0:
-                                    logger.warning("🚨 Thread ID bulunamadı")
-                                elif res != 1:
-                                    logger.error("🚨 Thread sonlandırma hatası")
-                                    # Geri al
-                                    ctypes.pythonapi.PyThreadState_SetAsyncExc(
-                                        ctypes.c_long(thread_id), None
-                                    )
-                                else:
-                                    logger.info("✅ Web thread zorla sonlandırıldı")
-                            except Exception as e:
-                                logger.error(f"❌ Thread zorla sonlandırma hatası: {e}")
-                    else:
-                        logger.info("✅ Web thread normal şekilde kapandı")
-
+                logger.info("🌐 Web server referansı temizleniyor...")
                 self.web_server = None
-                self.web_thread = None
 
-            logger.info("✅ Temizlik işlemleri tamamlandı")
+            # 5. Task referanslarını temizle
+            self.fastapi_task = None
+            self.robot_task = None
+
+            logger.info("✅ Graceful shutdown tamamlandı")
 
         except Exception as e:
-            logger.error(f"Temizlik sırasında hata: {e}")
+            logger.error(f"❌ Temizlik sırasında hata: {e}")
+            logger.info("🚨 Emergency cleanup başlatılıyor...")
+
+            # Emergency cleanup
+            try:
+                if self.robot:
+                    self.robot.acil_durdur()
+                    self.robot = None
+            except Exception:
+                pass
+
+            # Force task cancel
+            if self.fastapi_task and not self.fastapi_task.done():
+                self.fastapi_task.cancel()
+            if self.robot_task and not self.robot_task.done():
+                self.robot_task.cancel()
+
+            logger.info("🚨 Emergency cleanup tamamlandı")
+
+    async def _shutdown_uvicorn_server(self):
+        """Uvicorn server'ı graceful olarak kapat."""
+        if self.uvicorn_server:
+            logger.info("🔄 Uvicorn server graceful shutdown...")
+            await self.uvicorn_server.shutdown()
+            logger.info("✅ Uvicorn server kapatıldı")
+
+    async def _fastapi_server_baslat(self, web_config: dict):
+        """FastAPI server'ı pure async olarak başlat"""
+        try:
+            import uvicorn
+
+            host = web_config.get('host', '0.0.0.0')
+            port = web_config.get('port', 8000)
+
+            logger.info(f"🚀 FastAPI server başlatılıyor: http://{host}:{port}")
+
+            # Web server var mı kontrol et
+            if not self.web_server:
+                raise ValueError("FastAPI web server instance bulunamadı")
+
+            # Uvicorn Config ve Server oluştur
+            uvicorn_config = uvicorn.Config(
+                app=self.web_server.app,
+                host=host,
+                port=port,
+                log_level="info",
+                access_log=True
+            )
+
+            # Server referansını sakla - graceful shutdown için
+            self.uvicorn_server = uvicorn.Server(uvicorn_config)
+
+            # Server'ı async olarak başlat
+            logger.info("🔄 Uvicorn server async serve başlıyor...")
+            await self.uvicorn_server.serve()
+            logger.info("✅ Uvicorn server serve tamamlandı")
+
+        except asyncio.CancelledError:
+            logger.info("🛑 FastAPI server task iptal edildi")
+        except Exception as e:
+            logger.error(f"❌ FastAPI server async başlatma hatası: {e}")
+            raise
+
+    async def _shutdown_monitor(self):
+        """Shutdown event'ini bekler ve sinyal geldiğinde tamamlanır."""
+        try:
+            await self.shutdown_event.wait()
+            logger.info("🔔 Shutdown event alındı")
+        except asyncio.CancelledError:
+            logger.info("🔔 Shutdown monitor iptal edildi")
+
+    async def _graceful_task_cancellation(self, tasks: list, timeout: float = 10.0):
+        """Task'leri graceful şekilde iptal eder."""
+        logger.info(f"🔄 {len(tasks)} task graceful olarak iptal ediliyor...")
+
+        # Task'leri cancel et
+        for task in tasks:
+            if task and not task.done():
+                task.cancel()
+                logger.debug(f"📤 Task iptal edildi: {task.get_name()}")
+
+        # Tamamlanmalarını bekle (timeout ile)
+        if tasks:
+            try:
+                await asyncio.wait_for(
+                    asyncio.gather(*tasks, return_exceptions=True),
+                    timeout=timeout
+                )
+                logger.info("✅ Tüm task'ler graceful olarak iptal edildi")
+            except asyncio.TimeoutError:
+                logger.warning(f"⚠️ Task'ler {timeout}s içinde tamamlanamadı - force cancel")
+                # Force cancel yap
+                for task in tasks:
+                    if task and not task.done():
+                        task.cancel()
+                        logger.warning(f"🚨 Force cancel: {task.get_name()}")
+            except Exception as e:
+                logger.error(f"❌ Task cancellation hatası: {e}")
 
 
 def main():

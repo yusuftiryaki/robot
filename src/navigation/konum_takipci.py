@@ -29,6 +29,17 @@ class Konum:
     longitude: float  # GPS koordinatı
     timestamp: str
 
+    def __eq__(self, other):
+        """Eşitlik kontrolü - A* algoritması için"""
+        if not isinstance(other, Konum):
+            return False
+        return (abs(self.x - other.x) < 0.01 and
+                abs(self.y - other.y) < 0.01)
+
+    def __hash__(self):
+        """Hash metodu - set ve dictionary kullanımı için"""
+        return hash((round(self.x, 2), round(self.y, 2)))
+
 
 @dataclass
 class Hareket:
@@ -201,15 +212,15 @@ class KonumTakipci:
         self.kalman.predict(dt)
 
         # Enkoder verisi ile odometri güncelleme
-        if "motor_durumu" in sensor_data:
-            await self._enkoder_guncelle(sensor_data["motor_durumu"], dt)
+        if "enkoder" in sensor_data and sensor_data["enkoder"].gecerli:
+            await self._enkoder_guncelle(sensor_data["enkoder"], dt)
 
         # GPS verisi ile konum düzeltme
-        if sensor_data.get("gps") and sensor_data["gps"].get("latitude", 0) != 0:
+        if sensor_data.get("gps") and sensor_data["gps"].gecerli and sensor_data["gps"].enlem != 0:
             await self._gps_guncelle(sensor_data["gps"])
 
         # IMU verisi ile yön düzeltme
-        if sensor_data.get("imu"):
+        if sensor_data.get("imu") and sensor_data["imu"].gecerli:
             await self._imu_guncelle(sensor_data["imu"])
 
         # Kalman filtresi sonucu ile konum güncelle
@@ -228,11 +239,12 @@ class KonumTakipci:
 
         self.logger.debug(f"📍 Konum güncellendi: ({x:.2f}, {y:.2f}, {math.degrees(theta):.1f}°)")
 
-    async def _enkoder_guncelle(self, motor_data: Dict[str, Any], dt: float):
+    async def _enkoder_guncelle(self, enkoder_data, dt: float):
         """⚙️ Enkoder verisi ile odometri hesaplama"""
         try:
-            sol_enkoder = motor_data.get("enkoder", {}).get("sol_enkoder", 0)
-            sag_enkoder = motor_data.get("enkoder", {}).get("sag_enkoder", 0)
+            # EnkoderVeri dataclass'ından veri al
+            sol_enkoder = enkoder_data.sol_teker  # sol_teker = enkoder sayacı
+            sag_enkoder = enkoder_data.sag_teker  # sag_teker = enkoder sayacı
 
             # Enkoder farkını hesapla
             sol_delta = sol_enkoder - self.onceki_enkoder["sol"]
@@ -286,11 +298,11 @@ class KonumTakipci:
         except Exception as e:
             self.logger.error(f"❌ Enkoder güncelleme hatası: {e}")
 
-    async def _gps_guncelle(self, gps_data: Dict[str, Any]):
+    async def _gps_guncelle(self, gps_data):
         """🗺️ GPS verisi ile konum düzeltme"""
         try:
-            lat = gps_data.get("latitude", 0)
-            lon = gps_data.get("longitude", 0)
+            lat = gps_data.enlem
+            lon = gps_data.boylam
 
             if lat == 0 or lon == 0:
                 return
@@ -316,19 +328,97 @@ class KonumTakipci:
         except Exception as e:
             self.logger.error(f"❌ GPS güncelleme hatası: {e}")
 
-    async def _imu_guncelle(self, imu_data: Dict[str, Any]):
-        """🧭 IMU verisi ile yön düzeltme"""
+    async def _imu_guncelle(self, imu_data):
+        """🧭 IMU verisi ile yön düzeltme ve stabilizasyon"""
         try:
-            # IMU'dan yaw verisi alınabilirse kullan
-            # MPU-6050'de magnetometre olmadığı için yaw doğrudan alınamaz
-            # Jiroskop verisini entegre ederek yaw hesaplanabilir ama drift olur
+            # IMUVeri dataclass'ından verileri al
+            gyro_z = imu_data.acisal_hiz_z  # Yaw açısal hızı (Z ekseni)
 
-            gyro_z = imu_data.get("gyro_z", 0)
+            # İvme verileri - eğim ve titreşim tespiti için
+            accel_x = imu_data.ivme_x  # X ekseni ivme
+            accel_y = imu_data.ivme_y  # Y ekseni ivme
+            accel_z = imu_data.ivme_z  # Z ekseni ivme (gravity)
 
-            # Basit jiroskop entegrasyonu (sadece kısa süreli kullanım için)
-            # Gerçek uygulamada magnetometre veya görsel odometri gerekli
+            # Roll ve pitch değerleri direkt IMU'dan alınabilir
+            roll = imu_data.roll  # IMU'dan gelen roll
+            pitch = imu_data.pitch  # IMU'dan gelen pitch
+            # Yaw değeri genelde 0, çünkü MPU-6050'de magnetometre yok
 
-            self.logger.debug(f"🧭 IMU gyro_z: {gyro_z:.3f} rad/s")
+            # Sıcaklık kontrolü - sensör aşırı ısınmış mı?
+            sicaklik = imu_data.sicaklik
+            if sicaklik > 60.0:  # 60°C üstü kritik
+                self.logger.warning(f"🌡️ IMU aşırı ısınmış: {sicaklik:.1f}°C")
+                return  # Bu güncellemeyi atla
+
+            # Kalman filtresinin hız vektörlerini güncelle (jiroskop ile)
+            current_time = time.time()
+            dt = current_time - getattr(self, '_last_imu_update', current_time)
+            self._last_imu_update = current_time
+
+            if dt > 0 and dt < 1.0:  # Makul zaman aralığı kontrolü
+                # Jiroskop verisiyle açısal hız güncellemesi
+                # Kalman filtresinin hız state'lerini güncelle
+                self.kalman.state[5] = gyro_z  # vtheta = gyro_z
+
+                # Jiroskop drift'i çok fazlaysa kompanzasyon yap
+                if abs(gyro_z) < 0.01:  # Durgun durumdaysa (0.01 rad/s threshold)
+                    # Hafif drift düzeltmesi - enkoder bazlı açıya yakınlaştır
+                    self.kalman.state[5] *= 0.95  # %5 azalt
+
+                # Yüksek ivme durumunda ekstra güncelleme
+                total_accel = math.sqrt(accel_x**2 + accel_y**2 + accel_z**2)
+                if abs(total_accel - 9.81) > 2.0:  # 2 m/s² üstü ivme
+                    # Robot hızla hareket ediyor - IMU verilerine daha çok güven
+                    self.logger.debug(f"🚀 Yüksek ivme tespit edildi: {total_accel:.2f} m/s²")
+
+                    # Pozisyon düzeltmesi için basit ivme entegrasyonu
+                    # Bu sadece yüksek dinamik hareketlerde kullanılır
+                    if hasattr(self, '_last_accel_time'):
+                        accel_dt = current_time - self._last_accel_time
+                        if accel_dt > 0 and accel_dt < 0.1:  # 100ms'den kısa
+                            # Basit ivme entegrasyonu (çok kısa süreli)
+                            v_delta_x = accel_x * accel_dt
+                            v_delta_y = accel_y * accel_dt
+
+                            # Kalman filtresinin hız state'lerini güncelle
+                            self.kalman.state[3] += v_delta_x * 0.1  # Düşük ağırlık
+                            self.kalman.state[4] += v_delta_y * 0.1
+
+                    self._last_accel_time = current_time
+
+                # Eğim kontrolü - robot dengesiz mi?
+                roll_degrees = math.degrees(roll)
+                pitch_degrees = math.degrees(pitch)
+
+                if abs(roll_degrees) > 20 or abs(pitch_degrees) > 20:
+                    self.logger.warning(f"⚠️ Robot dengesiz! Roll: {roll_degrees:.1f}°, Pitch: {pitch_degrees:.1f}°")
+
+                    # Dengesizlik durumunda konum güvenilirliğini azalt
+                    # Kalman filtresinin ölçüm gürültüsünü artır
+                    instability_factor = min(abs(roll_degrees) + abs(pitch_degrees), 45) / 45
+                    self.kalman.R_encoder *= (1 + instability_factor * 0.5)
+
+                elif abs(roll_degrees) > 10 or abs(pitch_degrees) > 10:
+                    self.logger.debug(f"🔶 Hafif eğim: Roll: {roll_degrees:.1f}°, Pitch: {pitch_degrees:.1f}°")
+
+                # Titreşim tespiti (yüksek frekanslı gyro değişimi)
+                if hasattr(self, '_prev_gyro_z'):
+                    gyro_change = abs(gyro_z - self._prev_gyro_z)
+                    if gyro_change > 1.0:  # 1 rad/s'den fazla ani değişim
+                        self.logger.debug(f"📳 Titreşim/ani hareket tespit edildi: {gyro_change:.2f} rad/s")
+
+                self._prev_gyro_z = gyro_z
+
+                # IMU health check - değerler makul aralıkta mı?
+                if abs(gyro_z) > 10.0:  # 10 rad/s üstü anormal
+                    self.logger.warning(f"⚠️ Anormal gyro_z değeri: {gyro_z:.2f} rad/s")
+                    return  # Bu güncellemeyi atla
+
+                if total_accel > 50.0 or total_accel < 1.0:  # Anormal ivme
+                    self.logger.warning(f"⚠️ Anormal ivme değeri: {total_accel:.2f} m/s²")
+                    return  # Bu güncellemeyi atla
+
+                self.logger.debug(f"🧭 IMU güncellendi - Gyro_Z: {gyro_z:.3f} rad/s, Roll: {roll_degrees:.1f}°, Pitch: {pitch_degrees:.1f}°, Sıcaklık: {sicaklik:.1f}°C")
 
         except Exception as e:
             self.logger.error(f"❌ IMU güncelleme hatası: {e}")
@@ -399,7 +489,7 @@ class KonumTakipci:
             Mesafe (metre)
         """
         if not self.gps_reference or self.mevcut_konum.latitude == 0:
-            self.logger.warning("⚠️ GPS referansı yok, local mesafe hesaplanıyor")
+            self.logger.debug("🧭 GPS referansı yok, local mesafe hesaplanıyor")  # WARNING -> DEBUG
             # GPS olmadığında local koordinat kullan
             hedef_x, hedef_y = self._gps_to_local(hedef_lat, hedef_lon)
             return self.get_mesafe_to(hedef_x, hedef_y)
@@ -492,5 +582,11 @@ class KonumTakipci:
             }
         }
 
-    # ...existing code...
-    # ...existing code...
+    def gps_referans_ayarla(self, lat: float, lon: float):
+        """
+        🗺️ GPS referans noktasını manuel olarak ayarla
+
+        Simülasyon modunda veya başlangıçta GPS referansını ayarlamak için kullanılır.
+        """
+        self.gps_reference = {"lat": lat, "lon": lon}
+        self.logger.info(f"🗺️ GPS referans noktası manuel ayarlandı: ({lat:.6f}, {lon:.6f})")

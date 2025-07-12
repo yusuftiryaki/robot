@@ -1,133 +1,141 @@
-# OBA Robot - Raspberry Pi Hardware Configuration
-# Gerçek Donanım Ortamı Ayarları
-
-robot:
-  name: "OBA Hardware"
-  version: "1.0.0"
+# OBA Robot - Raspberry Pi Donanım Ortamı Ayarları
+# Bu dosya, robot_config.yaml'daki varsayılan ayarları geçersiz kılar.
+# Sadece gerçek donanımda farklı olan ayarları buraya ekleyin.
 
 # =====================================
-# ⚙️ HARDWARE SETTINGS
+# ⚙️ TEMEL AYARLAR
 # =====================================
+# Gerçek donanımda olduğumuz için simülasyonu kapatıyoruz.
 simulation:
   enabled: false
 
 # =====================================
-# 🚗 MOTOR CONTROL
+# 🚗 MOTOR KONTROLÜ
 # =====================================
 motors:
-  type: "hardware"
+  # Gerçek motor sürücüsü ve pin yapılandırması
+  type: "hardware" # motor tipini 'hardware' olarak değiştiriyoruz.
   driver: "l298n"
-  pins:
-    # Sol motor
-    left_pwm: 18
-    left_dir1: 19
-    left_dir2: 20
-    left_enable: 21
-    # Sağ motor
-    right_pwm: 12
-    right_dir1: 16
-    right_dir2: 17
-    right_enable: 25
-  specs:
-    max_speed: 0.8 # 0-1 arası
-    acceleration: 0.3
-    deceleration: 0.5
-    wheel_radius: 0.032 # meters
-    wheel_distance: 0.16 # meters
-    encoder_ppr: 20 # pulse per revolution
+
+  # L298N #1 - Tekerlek Motorları (Hareket)
+  wheels:
+    left:
+      # L298N #1 Motor A
+      pin_a: 7 # IN1
+      pin_b: 8 # IN2
+      pwm_pin: 18 # ENA (PWM)
+      enable_pin: 9 # Enable (opsiyonel)
+      encoder_pin_a: 2 # Encoder A
+      encoder_pin_b: 3 # Encoder B
+    right:
+      # L298N #1 Motor B
+      pin_a: 10 # IN3
+      pin_b: 11 # IN4
+      pwm_pin: 19 # ENB (PWM)
+      enable_pin: 13 # Enable (opsiyonel)
+      encoder_pin_a: 4 # Encoder A
+      encoder_pin_b: 5 # Encoder B
+  # L298N #2 - Yan Fırça Motorları
+  brushes:
+    side_right:
+      # L298N #2 Motor A
+      pin_a: 22 # IN1
+      pin_b: 23 # IN2
+      pwm_pin: 24 # ENA (PWM)
+      enable_pin: 25 # Enable
+    side_left:
+      # L298N #2 Motor B
+      pin_a: 20 # IN3
+      pin_b: 21 # IN4
+      pwm_pin: 26 # ENB (PWM)
+      enable_pin: 16 # Enable
+
+  # L298N #3 - Ana Fırça ve Fan
+  main_systems:
+    brush:
+      # L298N #3 Motor A (Ana fırça) - GPS çakışması giderildi
+      pin_a: 5 # IN1 (GPIO 14 yerine)
+      pin_b: 6 # IN2 (GPIO 15 yerine)
+      pwm_pin: 12 # ENA (PWM)
+      enable_pin: 17 # Enable
+    fan:
+      # L298N #3 Motor B (Fan) - Güvenli pinler
+      pin_a: 27 # IN3
+      pin_b: 28 # IN4 (varsa, yoksa atla)
+      pwm_pin: 13 # ENB (PWM) - GPIO 13 kullanılabilir
+      enable_pin: 1 # Enable (GPIO 1 dikkatli kullan)
 
 # =====================================
-# 📡 SENSORS
+# 📡 SENSÖRLER
 # =====================================
 sensors:
+  # Gerçek sensörler kullanılacak, sahte veriyi kapat.
   mock_enabled: false
 
   # I2C sensörleri
   i2c:
-    bus: 1
+    bus: 1 # Raspberry Pi'daki varsayılan I2C bus'ı
     devices:
-      - type: "mpu6050" # IMU
+      - type: "mpu6050"
         address: 0x68
         name: "main_imu"
-      - type: "ina219" # Güç monitörü
+      - type: "ina219"
         address: 0x40
-        name: "power_monitor"
+        name: "battery_monitor"
+        shunt_ohms: 0.1
+        max_expected_amps: 10.0
+        description: "Ana batarya seviye takibi"
+      - type: "ina219"
+        address: 0x41
+        name: "charging_monitor"
+        shunt_ohms: 0.1
+        max_expected_amps: 3.0
+        description: "Şarj istasyonu bağlantı kontrolü"
 
-  # GPIO sensörleri
+  # GPIO tabanlı sensörler (butonlar, tamponlar vb.)
   gpio:
     - type: "button"
-      pin: 2
+      pin: 15 # Emergency stop (GPIO 17 yerine - çakışma var)
       name: "emergency_stop"
       pull_up: true
-    - type: "led"
-      pin: 4
-      name: "status_led"
+    - type: "button"
+      pin: 14 # Front bumper (GPIO 26 yerine - çakışma var)
+      name: "front_bumper"
+      pull_up: true
+
+  # UART tabanlı sensörler (GPS vb.)
+  uart:
+    - type: "gps"
+      device: "/dev/serial0" # Pi'deki varsayılan UART portu
+      baud_rate: 9600
+      name: "gps_module"
 
 # =====================================
-# 📷 CAMERA SETTINGS
+# 📷 KAMERA
 # =====================================
 camera:
-  enabled: true
+  # Gerçek kamera kullanılacak.
   type: "hardware"
-  device: "/dev/video0"
-  resolution:
-    width: 640
-    height: 480
-  fps: 30
-  auto_exposure: true
-  auto_white_balance: true
-  brightness: 50
-  contrast: 50
-  saturation: 50
+  device: "/dev/video0" # Linux'taki varsayılan kamera aygıtı
 
 # =====================================
-# 🌐 WEB INTERFACE
-# =====================================
-web_interface:
-  enabled: true
-  host: "0.0.0.0"
-  port: 8080
-  debug: false
-  ssl_enabled: false
-  cors_enabled: true
-
-# =====================================
-# 📊 LOGGING
+# 📊 LOGLAMA
 # =====================================
 logging:
-  level: "INFO"
+  # Donanım üzerinde daha detaylı loglama için seviyeyi DEBUG yapabiliriz.
+  level: "DEBUG"
   console:
-    enabled: true
-    colored: false # Terminal renkleri Pi'de sorun çıkarabilir
-    format: "%(asctime)s | %(levelname)s | %(message)s"
+    # Raspberry Pi terminalinde renkli çıktı sorun yaratabilir.
+    colored: false
   file:
-    enabled: true
+    # Log dosyalarının Pi üzerindeki mutlak yolu
     path: "/home/pi/oba/logs"
-    filename: "robot.log"
-    max_size: "50MB"
-    backup_count: 3
-    rotation: "size"
-
-  # Syslog için
-  syslog:
-    enabled: true
-    facility: "daemon"
 
 # =====================================
-# 🤖 AI/ML SETTINGS
-# =====================================
-ai:
-  enabled: true
-  debug_mode: false
-  model_path: "/home/pi/oba/models"
-  use_cpu: true # Pi'de GPU yok
-  confidence_threshold: 0.7
-  max_inference_time: 1.0 # seconds
-
-# =====================================
-# 📁 DATA PATHS
+# 📁 VERİ YOLLARI
 # =====================================
 paths:
+  # Pi üzerindeki mutlak dosya yolları
   data: "/home/pi/oba/data"
   logs: "/home/pi/oba/logs"
   models: "/home/pi/oba/models"
@@ -135,56 +143,16 @@ paths:
   temp: "/tmp/oba"
 
 # =====================================
-# ⚡ PERFORMANCE OPTIMIZATION
+# ⚡ PERFORMANS
 # =====================================
 performance:
-  cpu_limit: 80 # %
-  memory_limit: 512 # MB
+  # Raspberry Pi gibi daha kısıtlı bir sistem için döngü sıklığını ayarlayalım.
   loop_frequency: 20 # Hz
-  sensor_update_rate: 10 # Hz
-  camera_buffer_size: 1
 
 # =====================================
-# 🔄 SYSTEM SETTINGS
-# =====================================
-system:
-  auto_start: true
-  watchdog_enabled: true
-  recovery_mode: true
-  gpio_cleanup: true
-
-  # Güç yönetimi
-  power_management:
-    low_battery_threshold: 20 # %
-    critical_battery_threshold: 10 # %
-    shutdown_on_critical: true
-    sleep_on_idle: true
-    idle_timeout: 300 # seconds
-
-# =====================================
-# 🛡️ SAFETY SETTINGS
+# 🛡️ GÜVENLİK
 # =====================================
 safety:
-  emergency_stop_enabled: true
-  obstacle_avoidance: true
-  max_speed_limit: 0.5 # m/s
-  collision_threshold: 10 # cm
-  failsafe_mode: "stop" # stop, return_home, shutdown
-
-# =====================================
-# 📡 COMMUNICATION
-# =====================================
-communication:
-  wifi:
-    ap_mode: false
-    ssid: "OBA_Robot"
-    password: "oba12345"
-
-  mqtt:
-    enabled: true
-    broker: "localhost"
-    port: 1883
-    topics:
-      status: "oba/status"
-      commands: "oba/commands"
-      telemetry: "oba/telemetry"
+  # Gerçek dünyada çarpışma mesafesini daha dikkatli ayarlayalım.
+  collision_detection:
+    distance_threshold: 0.10 # 10 cm

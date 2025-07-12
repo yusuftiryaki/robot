@@ -1,12 +1,14 @@
 """
-📷 Kamera İşlemci - Robot'un Gözleri
+📷 Kamera İşlemci - Robot'un Gözleri (HAL Pattern)
 Hacı Abi'nin görüntü işleme algoritması burada!
 
 Bu sınıf robot'un kamerasından görüntü işler:
 - Engel tanıma ve sınıflandırma
 - Şarj istasyonu tespiti
 - Otlak alanı analizi
-- Görsel odometri (opsiyonel)
+- HAL pattern ile temiz kamera abstraction
+
+HAL Pattern kullanarak simülasyon ve gerçek kamera arasında temiz ayrım sağlar.
 """
 
 # OpenCV import - dev container OpenGL sorunu için koşullu
@@ -27,12 +29,18 @@ except ImportError as e:
             self.COLOR_BGR2RGB = 4
             self.COLOR_BGR2HSV = 40
             self.COLOR_HSV2BGR = 54
+            self.COLOR_BGR2GRAY = 7
             self.INTER_AREA = 3
             self.MORPH_CLOSE = 3
             self.MORPH_OPEN = 2
             self.MORPH_RECT = 0
+            self.MORPH_ELLIPSE = 2
             self.THRESH_BINARY = 0
+            self.THRESH_BINARY_INV = 1
             self.THRESH_OTSU = 8
+            self.ADAPTIVE_THRESH_GAUSSIAN_C = 1
+            self.RETR_EXTERNAL = 0
+            self.CHAIN_APPROX_SIMPLE = 2
 
         def VideoCapture(self, *args):
             return DummyVideoCapture()
@@ -46,11 +54,23 @@ except ImportError as e:
         def threshold(self, img, thresh, maxval, type):
             return thresh, img
 
+        def adaptiveThreshold(self, img, maxval, adaptive_method, thresh_type, block_size, c):
+            return img
+
         def morphologyEx(self, img, op, kernel):
             return img
 
         def getStructuringElement(self, shape, ksize):
             return np.ones(ksize, dtype=np.uint8)
+
+        def inRange(self, img, lower, upper):
+            return np.zeros((img.shape[0], img.shape[1]), dtype=np.uint8)
+
+        def GaussianBlur(self, img, ksize, sigma):
+            return img
+
+        def arcLength(self, contour, closed):
+            return 100.0
 
         def findContours(self, img, mode, method):
             return [], []
@@ -60,6 +80,12 @@ except ImportError as e:
 
         def boundingRect(self, contour):
             return (0, 0, 0, 0)
+
+        def bitwise_and(self, img1, img2, mask=None):
+            return img1
+
+        def countNonZero(self, img):
+            return 0
 
         def rectangle(self, img, pt1, pt2, color, thickness):
             return img
@@ -73,6 +99,9 @@ except ImportError as e:
 
         def imencode(self, ext, img):
             return True, b'dummy_image_data'
+
+        def imwrite(self, filename, img):
+            return True
 
     class DummyVideoCapture:
         def __init__(self):
@@ -95,16 +124,19 @@ except ImportError as e:
 
     cv2 = DummyCV2()
 
-import asyncio
-import json
 import logging
-import time
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
+
+# HAL Pattern imports
+try:
+    from hardware.hal import KameraFactory, KameraInterface
+except ImportError:
+    from src.hardware.hal import KameraFactory, KameraInterface
 
 
 class EngelTipi(Enum):
@@ -140,56 +172,31 @@ class SarjIstasyonu:
 
 class KameraIslemci:
     """
-    📷 Ana Kamera İşlemci Sınıfı
+    📷 Ana Kamera İşlemci Sınıfı (HAL Pattern)
 
-    Raspberry Pi kamerasından görüntü alır ve işler.
-    OpenCV ile görüntü analizi yapar.
+    HAL pattern kullanarak kamera işlemleri yapar.
+    Business logic ve hardware abstraction temiz şekilde ayrılmıştır.
     """
 
     def __init__(self, camera_config: Dict[str, Any]):
         self.config = camera_config
         self.logger = logging.getLogger("KameraIslemci")
 
-        # Kamera parametreleri - Config'ten al
-        # Resolution - hem [width, height] hem de {width: x, height: y} formatlarını destekle
-        resolution_config = camera_config.get("resolution", [640, 480])
-        if isinstance(resolution_config, list):
-            # [width, height] formatında
-            self.resolution = tuple(resolution_config)
-        else:
-            # {width: x, height: y} formatında
-            self.resolution = tuple((
-                resolution_config.get("width", 640),
-                resolution_config.get("height", 480)
-            ))
-        self.framerate = camera_config.get("fps", 30)
-        self.device_id = camera_config.get("device_id", 0)
-        self.auto_exposure = camera_config.get("auto_exposure", True)
+        # HAL Pattern - Kamera interface oluştur
+        try:
+            self.kamera: KameraInterface = KameraFactory.create_kamera(camera_config)
+            self.logger.info(f"📷 Kamera HAL oluşturuldu: {type(self.kamera).__name__}")
+        except Exception as e:
+            self.logger.error(f"❌ Kamera HAL oluşturma hatası: {e}")
+            raise
 
-        # Simülasyon parametreleri
-        simulation_params = camera_config.get("simulation_params", {})
-        self.test_pattern = simulation_params.get("test_pattern", True)
-        self.noise_level = simulation_params.get("noise_level", 0.05)
-
-        # Simülasyon modu
-        self.simulation_mode = self._is_simulation()
-
-        # Kamera objesi
-        self.camera = None
-        self.son_goruntu = None
-        self.goruntu_sayaci = 0
-
-        # Engel tespit parametreleri
-        self.engel_min_alan = 500  # pixel²
+        # Engel tespit parametreleri - Daha az hassas (simülasyon uyumlu)
+        self.engel_min_alan = 1500  # pixel² - Daha büyük minimum alan
         self.engel_max_alan = 50000  # pixel²
 
         # Şarj istasyonu tespit parametreleri (IR LED'ler için)
         self.sarj_ir_threshold = 200
         self.sarj_min_contour_area = 100
-
-        # Kalibrasyon parametreleri
-        self.camera_matrix = None
-        self.dist_coeffs = None
 
         # Engel tanıma için basit renk aralıkları
         self.renk_araliklari = {
@@ -198,166 +205,29 @@ class KameraIslemci:
             "gri": {"lower": np.array([0, 0, 50]), "upper": np.array([180, 30, 200])}
         }
 
-        self.logger.info(
-            f"📷 Kamera işlemci başlatıldı (Simülasyon: {self.simulation_mode})")
-        self.logger.info(f"📷 Çözünürlük: {self.resolution}, FPS: {self.framerate}")
-        if self.simulation_mode:
-            self.logger.info(f"📷 Simülasyon: Test pattern: {self.test_pattern}, Noise: {self.noise_level}")
-        self._init_camera()
+        self.logger.info(f"📷 Kamera işlemci başlatıldı (HAL: {type(self.kamera).__name__})")
 
-    def _is_simulation(self) -> bool:
-        """Simülasyon modunda mı kontrol et"""
+    async def baslat(self) -> bool:
+        """🚀 Kamera sistemini başlat"""
         try:
-            from picamera2 import Picamera2
-            return False
-        except ImportError:
-            return True
-
-    def _init_camera(self):
-        """Kamerayı başlat"""
-        if self.simulation_mode:
-            self._init_simulation_camera()
-        else:
-            self._init_real_camera()
-
-    def _init_simulation_camera(self):
-        """Simülasyon kamerası başlat - Config'ten ayarları kullan"""
-        self.logger.info("🔧 Simülasyon kamerası başlatılıyor...")
-
-        # Config'ten simülasyon ayarlarını al
-        if self.test_pattern:
-            # Test paterni ile görüntü oluştur
-            self.son_goruntu = self._create_test_pattern()
-        else:
-            # Düz yeşil görüntü oluştur
-            self.son_goruntu = np.zeros(
-                (self.resolution[1], self.resolution[0], 3), dtype=np.uint8)
-            self.son_goruntu[:, :] = [0, 150, 0]  # Yeşil çimen rengi
-
-        # Noise ekle
-        if self.noise_level > 0:
-            self._add_noise_to_image()
-
-        self.logger.info("✅ Simülasyon kamerası hazır!")
-
-    def _create_test_pattern(self) -> np.ndarray:
-        """Test paterni oluştur"""
-        img = np.zeros((self.resolution[1], self.resolution[0], 3), dtype=np.uint8)
-
-        # Satranç tahtası paterni
-        square_size = 50
-        for i in range(0, self.resolution[1], square_size):
-            for j in range(0, self.resolution[0], square_size):
-                if (i // square_size + j // square_size) % 2 == 0:
-                    img[i:i + square_size, j:j + square_size] = [255, 255, 255]  # Beyaz
-                else:
-                    img[i:i + square_size, j:j + square_size] = [0, 0, 0]  # Siyah
-
-        return img
-
-    def _add_noise_to_image(self):
-        """Görüntüye noise ekle"""
-        if self.son_goruntu is not None:
-            noise = np.random.normal(0, self.noise_level * 255, self.son_goruntu.shape)
-            self.son_goruntu = np.clip(self.son_goruntu + noise, 0, 255).astype(np.uint8)
-
-    def _init_real_camera(self):
-        """Gerçek kamerayı başlat"""
-        self.logger.info("🔧 Fiziksel kamera başlatılıyor...")
-        try:
-            from picamera2 import Picamera2
-
-            self.camera = Picamera2()
-            config = self.camera.create_preview_configuration(
-                main={"format": "RGB888", "size": self.resolution}
-            )
-            self.camera.configure(config)
-            self.camera.start()
-
-            # Kamera kalibrasyonu yükle (varsa)
-            self._load_camera_calibration()
-
-            self.logger.info("✅ Fiziksel kamera hazır!")
-
+            self.logger.info("🚀 Kamera sistemi başlatılıyor...")
+            return await self.kamera.baslat()
         except Exception as e:
             self.logger.error(f"❌ Kamera başlatma hatası: {e}")
-            self.simulation_mode = True
-            self._init_simulation_camera()
-
-    def _load_camera_calibration(self):
-        """Kamera kalibrasyon parametrelerini yükle"""
-        try:
-            # Kalibrasyon dosyası varsa yükle
-            # Bu gerçek uygulamada OpenCV kamera kalibrasyonu ile oluşturulur
-            self.logger.info("📐 Kamera kalibrasyonu yüklendi")
-        except Exception as e:
-            self.logger.warning(f"⚠️ Kalibrasyon yüklenemedi: {e}")
+            return False
 
     async def goruntu_al(self) -> Optional[np.ndarray]:
         """
-        📸 Kameradan görüntü al
+        📸 HAL üzerinden kameradan görüntü al
 
         Returns:
             numpy.ndarray: BGR formatında görüntü
         """
         try:
-            if self.simulation_mode:
-                return await self._simulation_goruntu_al()
-            else:
-                return await self._real_goruntu_al()
+            return await self.kamera.goruntu_al()
         except Exception as e:
-            self.logger.error(f"❌ Görüntü alma hatası: {e}")
+            self.logger.error(f"❌ HAL görüntü alma hatası: {e}")
             return None
-
-    async def _simulation_goruntu_al(self) -> np.ndarray:
-        """Simülasyon görüntüsü oluştur"""
-        # Dinamik sahte görüntü oluştur
-        goruntu = np.zeros(
-            (self.resolution[1], self.resolution[0], 3), dtype=np.uint8)
-
-        # Yeşil arkaplan (çimen)
-        goruntu[:, :, 1] = 100  # Yeşil kanal
-
-        # Zamanla değişen sahte engeller ekle
-        t = time.time()
-
-        # Sahte ağaç (kahverengi dikdörtgen)
-        if int(t) % 10 < 5:  # 5 saniye görünür, 5 saniye gizli
-            cv2.rectangle(goruntu, (300, 200), (350, 400), (0, 50, 100), -1)
-
-        # Sahte taş (gri daire)
-        if int(t) % 15 < 7:
-            cv2.circle(goruntu, (150, 350), 30, (100, 100, 100), -1)
-
-        # Sahte şarj istasyonu (parlak noktalar)
-        if int(t) % 20 < 3:  # Arada şarj istasyonu görün
-            cv2.circle(goruntu, (500, 300), 10, (255, 255, 255), -1)
-            cv2.circle(goruntu, (520, 310), 8, (255, 255, 255), -1)
-
-        # Gürültü ekle
-        noise = np.random.randint(0, 20, goruntu.shape, dtype=np.uint8)
-        goruntu = cv2.add(goruntu, noise)
-
-        self.son_goruntu = goruntu
-        self.goruntu_sayaci += 1
-
-        return goruntu
-
-    async def _real_goruntu_al(self) -> np.ndarray:
-        """Gerçek kameradan görüntü al"""
-        if self.camera is None:
-            return None
-
-        # Picamera2'den görüntü al
-        goruntu = self.camera.capture_array()
-
-        # RGB'den BGR'ye çevir (OpenCV formatı)
-        goruntu = cv2.cvtColor(goruntu, cv2.COLOR_RGB2BGR)
-
-        self.son_goruntu = goruntu
-        self.goruntu_sayaci += 1
-
-        return goruntu
 
     async def engel_analiz_et(self) -> Dict[str, Any]:
         """
@@ -487,16 +357,16 @@ class KameraIslemci:
         return taslar
 
     async def _genel_engel_tespit_et(self, goruntu: np.ndarray) -> List[Engel]:
-        """Genel engel tespiti (kontur analizi)"""
+        """Genel engel tespiti (kontur analizi) - Daha az hassas"""
         # Gri tonlamaya çevir
         gray = cv2.cvtColor(goruntu, cv2.COLOR_BGR2GRAY)
 
-        # Gaussian blur uygula
-        blurred = cv2.GaussianBlur(gray, (15, 15), 0)
+        # Gaussian blur uygula - Daha fazla blur
+        blurred = cv2.GaussianBlur(gray, (21, 21), 0)
 
-        # Adaptive threshold
+        # Adaptive threshold - Daha az hassas parametreler
         thresh = cv2.adaptiveThreshold(
-            blurred, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 11, 2
+            blurred, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 21, 8
         )
 
         # Konturları bul
@@ -509,9 +379,9 @@ class KameraIslemci:
             if self.engel_min_alan < alan < self.engel_max_alan:
                 x, y, w, h = cv2.boundingRect(contour)
 
-                # Aspect ratio kontrolü
+                # Aspect ratio kontrolü - Daha geniş aralık
                 aspect_ratio = w / h
-                if 0.2 < aspect_ratio < 5.0:  # Makul aspect ratio
+                if 0.1 < aspect_ratio < 10.0:  # Daha geniş aspect ratio aralığı
                     mesafe = self._pixel_to_distance(w, h, "bilinmeyen")
 
                     engel = Engel(
@@ -620,14 +490,13 @@ class KameraIslemci:
                                 (p1[0] + p2[0]) // 2, (p1[1] + p2[1]) // 2)
 
                             # Mesafe tahmini (merkez pixel'den)
-                            img_center_x = self.resolution[0] // 2
-                            pixel_distance = abs(
-                                sarj_merkezi[0] - img_center_x)
+                            resolution = self.kamera.get_resolution()
+                            img_center_x = resolution[0] // 2
                             sarj_mesafesi = self._pixel_to_distance(
                                 int(mesafe), int(mesafe), "sarj")
 
                             # Yön hesaplama (radyan)
-                            sarj_yonu = np.arctan2(sarj_merkezi[1] - self.resolution[1] // 2,
+                            sarj_yonu = np.arctan2(sarj_merkezi[1] - resolution[1] // 2,
                                                    sarj_merkezi[0] - img_center_x)
                             break
 
@@ -692,8 +561,10 @@ class KameraIslemci:
                 v_nonzero = v_channel[v_channel > 0]
 
                 if len(v_nonzero) > 0:
-                    ot_yogunlugu = np.mean(v_nonzero) / 255.0
-                    ot_uniformlugu = 1.0 - (np.std(v_nonzero) / 255.0)
+                    # Type assertion to fix numpy typing issues
+                    v_array = np.asarray(v_nonzero, dtype=np.float32)
+                    ot_yogunlugu = float(np.mean(v_array)) / 255.0
+                    ot_uniformlugu = 1.0 - (float(np.std(v_array)) / 255.0)
                 else:
                     ot_yogunlugu = 0.0
                     ot_uniformlugu = 0.0
@@ -722,37 +593,45 @@ class KameraIslemci:
             self.logger.error(f"❌ Otlak analizi hatası: {e}")
             return {"analiz_basarili": False}
 
-    def goruntu_kaydet(self, dosya_adi: str):
-        """Mevcut görüntüyü kaydet"""
-        if self.son_goruntu is not None:
-            try:
-                cv2.imwrite(
-                    f"logs/{dosya_adi}_{self.goruntu_sayaci}.jpg", self.son_goruntu)
-                self.logger.info(
-                    f"💾 Görüntü kaydedildi: {dosya_adi}_{self.goruntu_sayaci}.jpg")
-            except Exception as e:
-                self.logger.error(f"❌ Görüntü kaydetme hatası: {e}")
-
     def get_kamera_durumu(self) -> Dict[str, Any]:
-        """Kamera durumu bilgisi"""
-        return {
-            "aktif": self.camera is not None or self.simulation_mode,
-            "simülasyon": self.simulation_mode,
-            "resolution": self.resolution,
-            "framerate": self.framerate,
-            "goruntu_sayaci": self.goruntu_sayaci,
-            "son_goruntu_zamani": datetime.now().isoformat() if self.son_goruntu is not None else None
-        }
+        """HAL üzerinden kamera durumu bilgisi"""
+        try:
+            hal_bilgi = self.kamera.get_kamera_bilgisi()
+            return {
+                **hal_bilgi,
+                "engel_tespit_parametreleri": {
+                    "min_alan": self.engel_min_alan,
+                    "max_alan": self.engel_max_alan
+                }
+            }
+        except Exception as e:
+            self.logger.error(f"❌ Kamera durumu alma hatası: {e}")
+            return {"aktif": False, "hata": str(e)}
+
+    async def durdur(self):
+        """
+        🛑 HAL üzerinden kamerayı durdur ve kaynakları temizle
+        """
+        self.logger.info("🛑 Kamera durdurma işlemi başlatılıyor...")
+
+        try:
+            await self.kamera.durdur()
+            self.logger.info("✅ Kamera HAL üzerinden durduruldu")
+        except Exception as e:
+            self.logger.error(f"❌ Kamera durdurma hatası: {e}")
+
+    def goruntu_kaydet(self, dosya_adi: str):
+        """HAL üzerinden mevcut görüntüyü kaydet"""
+        try:
+            dosya_yolu = f"logs/{dosya_adi}_{self.kamera.get_kamera_bilgisi().get('goruntu_sayaci', 0)}.jpg"
+            if self.kamera.goruntu_kaydet(dosya_yolu):
+                self.logger.info(f"💾 Görüntü HAL üzerinden kaydedildi: {dosya_yolu}")
+            else:
+                self.logger.warning("⚠️ Görüntü kaydedilemedi")
+        except Exception as e:
+            self.logger.error(f"❌ Görüntü kaydetme hatası: {e}")
 
     def __del__(self):
         """Kamera işlemci kapatılıyor"""
         if hasattr(self, 'logger'):
             self.logger.info("👋 Kamera işlemci kapatılıyor...")
-
-        if hasattr(self, 'camera') and self.camera is not None:
-            try:
-                self.camera.stop()
-                self.camera.close()
-            except:
-                pass
-                pass

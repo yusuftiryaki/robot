@@ -13,9 +13,8 @@ import os
 import sys
 import time
 import unittest
-from unittest.mock import Mock, patch
 
-from test_utils import TestRaporu, TestVeriUreticisi, TestYardimcilari
+from test_utils import TestRaporu, TestVeriUreticisi
 
 from src.hardware.motor_kontrolcu import MotorKontrolcu
 from src.hardware.sensor_okuyucu import SensorOkuyucu
@@ -29,14 +28,22 @@ class TestSensorOkuyucu(unittest.TestCase):
 
     def setUp(self):
         """Test başlangıç ayarları."""
-        # Basit config sözlüğü
+        # Mock environment manager
+        class MockEnvironmentManager:
+            is_simulation_mode = True
+
+        # Yeni config yapısı
         sensor_config = {
-            "mpu6050": {"i2c_address": 0x68, "sda_pin": 2, "scl_pin": 3},
-            "gps": {"uart_tx": 14, "uart_rx": 15, "baud_rate": 9600},
-            "ina219": {"i2c_address": 0x40},
-            "front_bumper": {"pin": 16, "pull_up": True}
+            "imu": {"enabled": True, "type": "mpu6050", "i2c_address": 0x68},
+            "gps": {"enabled": True, "type": "neo6m", "device": "/dev/ttyS0"},
+            "guc": {"enabled": True, "type": "ina219", "i2c_address": 0x40},
+            "tampon": {"enabled": True, "type": "button", "pin": 16},
+            "enkoder": {"enabled": True, "type": "rotary_encoder"},
+            "acil_durma": {"enabled": True, "type": "button", "pin": 25}
         }
-        self.sensor_okuyucu = SensorOkuyucu(sensor_config)
+
+        self.environment_manager = MockEnvironmentManager()
+        self.sensor_okuyucu = SensorOkuyucu(sensor_config, self.environment_manager)
         self.test_verisi = TestVeriUreticisi.ornek_sensor_verisi()
 
     def tearDown(self):
@@ -47,46 +54,63 @@ class TestSensorOkuyucu(unittest.TestCase):
     def test_sensor_okuyucu_baslangic(self):
         """Sensör okuyucu başlangıç testi."""
         self.assertIsInstance(self.sensor_okuyucu, SensorOkuyucu)
-        self.assertTrue(self.sensor_okuyucu.simulation_mode)
+        self.assertTrue(self.sensor_okuyucu.simülasyon_modu)
 
     def test_sensor_veri_okuma(self):
         """Sensör veri okuma testi."""
-        async def _test():
-            # Tüm sensör verilerini oku
-            sensor_data = await self.sensor_okuyucu.tum_verileri_oku()
-            self.assertIsNotNone(sensor_data)
 
-            # Timestamp kontrolü
-            self.assertIn("timestamp", sensor_data)
+        def sync_test():
+            # Threading ile async test çalıştır
+            import concurrent.futures
+            import threading
 
-            # IMU verisi kontrolü
-            if sensor_data.get("imu"):
-                self.assertIn("accel_x", sensor_data["imu"])
-                self.assertIn("gyro_x", sensor_data["imu"])
+            def run_async_test():
+                # Yeni thread'te yeni event loop
+                import asyncio
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
 
-        # Async test çalıştır
-        asyncio.run(_test())
+                try:
+                    async def _test():
+                        # Sensörleri başlat
+                        await self.sensor_okuyucu.başlat()
+
+                        # Tüm sensör verilerini oku
+                        sensor_data = await self.sensor_okuyucu.tüm_sensör_verilerini_oku()
+                        self.assertIsNotNone(sensor_data)
+
+                        # Timestamp kontrolü
+                        self.assertIn("timestamp", sensor_data)
+
+                        # Sistem durumu kontrolü
+                        self.assertIn("sistem_durumu", sensor_data)
+
+                    return loop.run_until_complete(_test())
+                finally:
+                    loop.close()
+
+            # Ayrı thread'te çalıştır
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                future = executor.submit(run_async_test)
+                return future.result(timeout=10)
+
+        sync_test()
 
     def test_imu_veri_yapisi(self):
         """IMU veri yapısı testi."""
         imu_data = self.test_verisi['imu']
 
         # Gerekli anahtarlar mevcut mu?
-        self.assertIn('ivme', imu_data)
-        self.assertIn('gyro', imu_data)
-        self.assertIn('compass', imu_data)
-
-        # İvme verisi
-        ivme = imu_data['ivme']
-        self.assertIn('x', ivme)
-        self.assertIn('y', ivme)
-        self.assertIn('z', ivme)
-
-        # Gyro verisi
-        gyro = imu_data['gyro']
-        self.assertIn('x', gyro)
-        self.assertIn('y', gyro)
-        self.assertIn('z', gyro)
+        self.assertIn('ivme_x', imu_data)
+        self.assertIn('ivme_y', imu_data)
+        self.assertIn('ivme_z', imu_data)
+        self.assertIn('gyro_x', imu_data)
+        self.assertIn('gyro_y', imu_data)
+        self.assertIn('gyro_z', imu_data)
+        self.assertIn('compass_baslik', imu_data)
+        self.assertIn('sicaklik', imu_data)
+        self.assertIn('kalibrasyon_durumu', imu_data)
+        self.assertIn('hata_mesaji', imu_data)
 
     def test_gps_veri_yapisi(self):
         """GPS veri yapısı testi."""
@@ -96,23 +120,32 @@ class TestSensorOkuyucu(unittest.TestCase):
         self.assertIn('latitude', gps_data)
         self.assertIn('longitude', gps_data)
         self.assertIn('altitude', gps_data)
+        self.assertIn('fix_quality', gps_data)
+        self.assertIn('uydu_sayisi', gps_data)
+        self.assertIn('hiz', gps_data)
+        self.assertIn('kurs', gps_data)
+        self.assertIn('hata_mesaji', gps_data)
 
         # Koordinat sınırları
         self.assertTrue(-90 <= gps_data['latitude'] <= 90)
         self.assertTrue(-180 <= gps_data['longitude'] <= 180)
 
-    def test_batarya_veri_yapisi(self):
-        """Batarya veri yapısı testi."""
-        batarya_data = self.test_verisi['batarya']
+    def test_guc_veri_yapisi(self):
+        """Güç veri yapısı testi."""
+        guc_data = self.test_verisi['guc']
 
         # Gerekli anahtarlar mevcut mu?
-        self.assertIn('voltaj', batarya_data)
-        self.assertIn('akim', batarya_data)
-        self.assertIn('sarj_durumu', batarya_data)
+        self.assertIn('voltaj', guc_data)
+        self.assertIn('akim', guc_data)
+        self.assertIn('guc', guc_data)
+        self.assertIn('sarj_durumu', guc_data)
+        self.assertIn('sarj_oluyor', guc_data)
+        self.assertIn('sicaklik', guc_data)
+        self.assertIn('hata_mesaji', guc_data)
 
         # Değer sınırları
-        self.assertTrue(0 <= batarya_data['sarj_durumu'] <= 100)
-        self.assertTrue(batarya_data['voltaj'] > 0)
+        self.assertTrue(0 <= guc_data['sarj_durumu'] <= 100)
+        self.assertTrue(guc_data['voltaj'] > 0)
 
 
 class TestMotorKontrolcu(unittest.TestCase):
@@ -120,22 +153,29 @@ class TestMotorKontrolcu(unittest.TestCase):
 
     def setUp(self):
         """Test başlangıç ayarları."""
+        # Mock environment manager
+        class MockEnvironmentManager:
+            is_simulation_mode = True
+
         # Basit motor config sözlüğü
         motor_config = {
             "left_wheel": {"pin_a": 18, "pin_b": 19, "max_speed": 255},
             "right_wheel": {"pin_a": 21, "pin_b": 22, "max_speed": 255},
             "main_brush": {"pin_a": 24, "pin_b": 25, "max_speed": 200}
         }
-        self.motor_kontrolcu = MotorKontrolcu(motor_config)
+        self.environment_manager = MockEnvironmentManager()
+        self.motor_kontrolcu = MotorKontrolcu(motor_config, self.environment_manager)
         self.test_verisi = TestVeriUreticisi.ornek_motor_verisi()
 
     def tearDown(self):
         """Test sonrası temizlik."""
-        # Motorları durdur
-        try:
-            asyncio.run(self.motor_kontrolcu.durdur())
-        except Exception:
-            pass
+        # Motorları senkron şekilde durdur
+        if hasattr(self.motor_kontrolcu, 'motorlar_aktif'):
+            self.motor_kontrolcu.motorlar_aktif = False
+            # Manual cleanup without async
+            self.motor_kontrolcu.mevcut_hizlar = {"sol": 0.0, "sag": 0.0}
+            self.motor_kontrolcu.firca_durumu = {"ana": False, "sol": False, "sag": False}
+            self.motor_kontrolcu.fan_durumu = False
 
     def test_motor_kontrolcu_baslangic(self):
         """Motor kontrolcü başlangıç testi."""
@@ -144,55 +184,77 @@ class TestMotorKontrolcu(unittest.TestCase):
 
     def test_tekerlek_hareket_kontrolu(self):
         """Tekerlek hareket kontrolü testi."""
-        async def _test():
-            # Hareket komutları ile test et
-            from src.hardware.motor_kontrolcu import HareketKomut
 
-            # İleri hareket komutu
-            hareket = HareketKomut(linear_hiz=0.5, angular_hiz=0.0)
-            await self.motor_kontrolcu.hareket_uygula(hareket)
+        def sync_test():
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
 
-            # Dönüş hareketi komutu
-            donus = HareketKomut(linear_hiz=0.0, angular_hiz=0.5)
-            await self.motor_kontrolcu.hareket_uygula(donus)
+            try:
+                async def _test():
+                    # Hareket komutları ile test et
+                    # İleri hareket komutu
+                    await self.motor_kontrolcu.hareket_et(0.5, 0.0)
 
-            # Motorları durdur
-            await self.motor_kontrolcu.durdur()
+                    # Dönüş hareketi komutu
+                    await self.motor_kontrolcu.hareket_et(0.0, 0.5)
 
-        asyncio.run(_test())
+                    # Motorları durdur
+                    await self.motor_kontrolcu.acil_durdur()
+
+                return loop.run_until_complete(_test())
+            finally:
+                loop.close()
+
+        sync_test()
 
     def test_donus_hareket_kontrolu(self):
         """Dönüş hareket kontrolü testi."""
-        async def _test():
-            from src.hardware.motor_kontrolcu import HareketKomut
 
-            # Sola dönüş komutu
-            sol_donus = HareketKomut(linear_hiz=0.0, angular_hiz=-0.5)  # Negatif = sol
-            await self.motor_kontrolcu.hareket_uygula(sol_donus)
+        def sync_test():
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
 
-            # Sağa dönüş komutu
-            sag_donus = HareketKomut(linear_hiz=0.0, angular_hiz=0.5)   # Pozitif = sağ
-            await self.motor_kontrolcu.hareket_uygula(sag_donus)
+            try:
+                async def _test():
+                    # Sola dönüş komutu
+                    await self.motor_kontrolcu.hareket_et(0.0, -0.5)  # Negatif = sol
 
-            await self.motor_kontrolcu.durdur()
+                    # Sağa dönüş komutu
+                    await self.motor_kontrolcu.hareket_et(0.0, 0.5)   # Pozitif = sağ
 
-        asyncio.run(_test())
+                    await self.motor_kontrolcu.acil_durdur()
+
+                return loop.run_until_complete(_test())
+            finally:
+                loop.close()
+
+        sync_test()
 
     def test_firca_kontrolu(self):
         """Fırça kontrolü testi."""
-        async def _test():
-            # Ana fırçayı başlat
-            await self.motor_kontrolcu.fircalari_calistir(aktif=True, ana=True, yan=False)
 
-            # Tüm fırçaları başlat
-            await self.motor_kontrolcu.fircalari_calistir(aktif=True, ana=True, yan=True)
+        def sync_test():
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
 
-            # Fırçaları durdur
-            await self.motor_kontrolcu.fircalari_calistir(aktif=False)
+            try:
+                async def _test():
+                    # Ana fırçayı başlat
+                    self.motor_kontrolcu.firca_kontrol(ana=True, sol=False, sag=False)
 
-            await self.motor_kontrolcu.durdur()
+                    # Tüm fırçaları başlat
+                    self.motor_kontrolcu.firca_kontrol(ana=True, sol=True, sag=True)
 
-        asyncio.run(_test())
+                    # Fırçaları durdur
+                    self.motor_kontrolcu.firca_kontrol(ana=False, sol=False, sag=False)
+
+                    await self.motor_kontrolcu.acil_durdur()
+
+                return loop.run_until_complete(_test())
+            finally:
+                loop.close()
+
+        sync_test()
 
     def test_motor_guvenlik_sinirlari(self):
         """Motor güvenlik sınırları testi."""
@@ -210,121 +272,150 @@ class TestDonanim(unittest.TestCase):
 
     def setUp(self):
         """Test başlangıç ayarları."""
+        # Mock environment manager
+        class MockEnvironmentManager:
+            is_simulation_mode = True
+
         # Config'ler doğru formatta
         sensor_config = {
-            "mpu6050": {"i2c_address": 0x68, "sda_pin": 2, "scl_pin": 3},
-            "gps": {"uart_tx": 14, "uart_rx": 15, "baud_rate": 9600},
-            "ina219": {"i2c_address": 0x40},
-            "front_bumper": {"pin": 16, "pull_up": True}
+            "imu": {"enabled": True, "type": "mpu6050", "i2c_address": 0x68},
+            "gps": {"enabled": True, "type": "neo6m", "device": "/dev/ttyS0"},
+            "guc": {"enabled": True, "type": "ina219", "i2c_address": 0x40},
+            "tampon": {"enabled": True, "type": "button", "pin": 16},
+            "enkoder": {"enabled": True, "type": "rotary_encoder"},
+            "acil_durma": {"enabled": True, "type": "button", "pin": 25}
         }
         motor_config = {
             "left_wheel": {"pin_a": 18, "pin_b": 19, "max_speed": 255},
             "right_wheel": {"pin_a": 21, "pin_b": 22, "max_speed": 255},
             "main_brush": {"pin_a": 24, "pin_b": 25, "max_speed": 200}
         }
-        self.sensor_okuyucu = SensorOkuyucu(sensor_config)
-        self.motor_kontrolcu = MotorKontrolcu(motor_config)
+
+        self.environment_manager = MockEnvironmentManager()
+        self.sensor_okuyucu = SensorOkuyucu(sensor_config, self.environment_manager)
+        self.motor_kontrolcu = MotorKontrolcu(motor_config, self.environment_manager)
 
     def test_donanim_entegrasyonu(self):
         """Donanım entegrasyon testi."""
-        async def _test():
-            from src.hardware.motor_kontrolcu import HareketKomut
 
-            # Sensör verisi oku
-            sensor_data = await self.sensor_okuyucu.tum_verileri_oku()
-            self.assertIsNotNone(sensor_data)
+        def sync_test():
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
 
-            # Motor komutunu gönder
-            hareket = HareketKomut(linear_hiz=0.25, angular_hiz=0.0)
-            await self.motor_kontrolcu.hareket_uygula(hareket)
+            try:
+                async def _test():
+                    # Sensör verisi oku
+                    sensor_data = await self.sensor_okuyucu.tüm_sensör_verilerini_oku()
+                    self.assertIsNotNone(sensor_data)
 
-            # Sistemleri durdur
-            await self.motor_kontrolcu.durdur()
+                    # Motor komutunu gönder
+                    await self.motor_kontrolcu.hareket_et(0.25, 0.0)
 
-        asyncio.run(_test())
+                    # Sistemleri durdur
+                    await self.motor_kontrolcu.acil_durdur()
+
+                return loop.run_until_complete(_test())
+            finally:
+                loop.close()
+
+        sync_test()
 
     def test_donanim_performansi(self):
         """Donanım performans testi."""
-        async def _test():
-            # Performans ölçümü
-            baslangic_zamani = time.time()
-            veri_sayisi = 0
 
-            for _ in range(10):  # 10 kez veri oku
-                sensor_data = await self.sensor_okuyucu.tum_verileri_oku()
-                if sensor_data:
-                    veri_sayisi += 1
-                await asyncio.sleep(0.1)  # 100ms aralık
-
-            bitis_zamani = time.time()
-            # Süre hesaplama - kullanımasak da ölçüm için gerekli
-            _ = bitis_zamani - baslangic_zamani
-
-            # En az %80 veri oranı bekleniyor
-            veri_orani = veri_sayisi / 10
-            self.assertGreater(veri_orani, 0.8)
-
-        asyncio.run(_test())
-
-
-async def donanim_testlerini_calistir():
-    """Tüm donanım testlerini çalıştır."""
-    rapor = TestRaporu()
-
-    print("🔧 Donanım Testleri Başlıyor...")
-    print("=" * 50)
-
-    # Test sınıfları
-    test_siniflari = [
-        TestSensorOkuyucu,
-        TestMotorKontrolcu,
-        TestDonanim
-    ]
-
-    for test_sinifi in test_siniflari:
-        print(f"\n📋 {test_sinifi.__name__} testleri...")
-
-        # Test suite oluştur
-        suite = unittest.TestLoader().loadTestsFromTestCase(test_sinifi)
-
-        for test in suite:
-            if hasattr(test, '_testMethodName'):
-                test_adi = test._testMethodName
-                test_sinifi_adi = test.__class__.__name__
-            else:
-                test_adi = str(test)
-                test_sinifi_adi = "Unknown"
-
-            baslangic = time.time()
+        def sync_test():
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
 
             try:
-                # Async test mi kontrol et
-                test_method = getattr(test, test_adi)
-                if asyncio.iscoroutinefunction(test_method):
-                    await test_method()
-                else:
-                    test_method()
+                async def _test():
+                    # Performans ölçümü
+                    baslangic_zamani = time.time()
+                    veri_sayisi = 0
 
-                sure = time.time() - baslangic
-                rapor.test_sonucu_ekle(
-                    f"{test_sinifi.__name__}.{test_adi}", True, sure)
-                print(f"  ✅ {test_adi} ({sure:.2f}s)")
+                    for _ in range(10):  # 10 kez veri oku
+                        sensor_data = await self.sensor_okuyucu.tüm_sensör_verilerini_oku()
+                        if sensor_data:
+                            veri_sayisi += 1
+                        await asyncio.sleep(0.1)  # 100ms aralık
 
-            except Exception as e:
-                sure = time.time() - baslangic
-                rapor.test_sonucu_ekle(
-                    f"{test_sinifi.__name__}.{test_adi}", False, sure, str(e))
-                print(f"  ❌ {test_adi} ({sure:.2f}s) - {e}")
+                    bitis_zamani = time.time()
+                    # Süre hesaplama - kullanımasak da ölçüm için gerekli
+                    _ = bitis_zamani - baslangic_zamani
 
-    # Raporu göster
-    print("\n" + rapor.rapor_olustur())
+                    # En az %80 veri oranı bekleniyor
+                    veri_orani = veri_sayisi / 10
+                    self.assertGreater(veri_orani, 0.8)
 
-    # Raporu kaydet
-    rapor.rapor_kaydet('logs/donanim_test_raporu.txt')
+                return loop.run_until_complete(_test())
+            finally:
+                loop.close()
+
+        sync_test()
+
+
+def donanim_testlerini_calistir():
+    """Tüm donanım testlerini çalıştır."""
+    import concurrent.futures
+    import threading
+
+    def run_tests_in_thread():
+        """Threading ile testleri çalıştır."""
+        rapor = TestRaporu()
+
+        print("🔧 Donanım Testleri Başlıyor...")
+        print("=" * 50)
+
+        # Test sınıfları
+        test_siniflari = [
+            TestSensorOkuyucu,
+            TestMotorKontrolcu,
+            TestDonanim
+        ]
+
+        for test_sinifi in test_siniflari:
+            print(f"\n📋 {test_sinifi.__name__} testleri...")
+
+            # Test suite oluştur
+            suite = unittest.TestLoader().loadTestsFromTestCase(test_sinifi)
+
+            for test in suite:
+                test_adi = str(test).split('.')[-1].split()[0]
+                test_sinifi_adi = test.__class__.__name__
+
+                baslangic = time.time()
+
+                try:
+                    # Test çalıştır
+                    test.debug()
+
+                    sure = time.time() - baslangic
+                    rapor.test_sonucu_ekle(
+                        f"{test_sinifi_adi}.{test_adi}", True, sure)
+                    print(f"  ✅ {test_adi} ({sure:.2f}s)")
+
+                except Exception as e:
+                    sure = time.time() - baslangic
+                    rapor.test_sonucu_ekle(
+                        f"{test_sinifi_adi}.{test_adi}", False, sure, str(e))
+                    print(f"  ❌ {test_adi} ({sure:.2f}s) - {e}")
+
+        # Raporu göster
+        print("\n" + rapor.rapor_olustur())
+
+        # Raporu kaydet
+        rapor.rapor_kaydet('logs/donanim_test_raporu.txt')
+
+        return rapor
+
+    # Threading ile testleri çalıştır
+    with concurrent.futures.ThreadPoolExecutor() as executor:
+        future = executor.submit(run_tests_in_thread)
+        return future.result(timeout=60)  # 60 saniye timeout
+
 
 if __name__ == "__main__":
     # Test runner
     print("🧪 Donanım Test Runner")
-    asyncio.run(donanim_testlerini_calistir())
-    print("🧪 Donanım Test Runner")
-    asyncio.run(donanim_testlerini_calistir())
+    donanim_testlerini_calistir()
+    print("✅ Donanım testleri tamamlandı!")

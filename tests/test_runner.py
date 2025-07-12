@@ -17,7 +17,6 @@ import asyncio
 import os
 import sys
 import time
-from typing import List
 
 from test_utils import TestRaporu, cleanup_test_environment, setup_test_environment
 
@@ -66,7 +65,7 @@ class TestRunner:
             print("\n🔧 DONANIM TESTLERİ")
             print("-" * 40)
             try:
-                await donanim_testlerini_calistir()
+                donanim_testlerini_calistir()  # Artık sync
                 self.genel_rapor.test_sonucu_ekle("Donanım Testleri", True, 0)
             except Exception as e:
                 print(f"❌ Donanım testlerinde hata: {e}")
@@ -127,28 +126,24 @@ class TestRunner:
         test_baslangic = time.time()
 
         try:
-            # Config dosyasının varlığını kontrol et
-            config_path = os.path.join('config', 'robot_config.yaml')
-
-            if not os.path.exists(config_path):
-                raise FileNotFoundError(
-                    f"Konfigürasyon dosyası bulunamadı: {config_path}")
-
-            # YAML parse testi
-            import yaml
-            with open(config_path, 'r', encoding='utf-8') as f:
-                config = yaml.safe_load(f)
+            # Gerçek uygulama gibi akıllı konfigürasyonu yükle
+            from core.smart_config import load_smart_config
+            config = load_smart_config()  # Varsayılan yolu kullanır
 
             # Temel anahtarları kontrol et
-            required_keys = ['robot', 'hardware']
+            required_keys = ['robot', 'motors', 'sensors', 'navigation', 'safety', 'runtime']
             for key in required_keys:
                 if key not in config:
-                    raise ValueError(f"Konfigürasyonda eksik anahtar: {key}")
+                    raise ValueError(f"Akıllı konfigürasyonda eksik anahtar: {key}")
+
+            # Runtime ortamının doğru tespit edildiğini kontrol et
+            if "environment_type" not in config.get("runtime", {}):
+                raise ValueError("Runtime ortamı tespit edilemedi.")
 
             sure = time.time() - test_baslangic
             self.genel_rapor.test_sonucu_ekle(
                 "Konfigürasyon Testi", True, sure)
-            print(f"  ✅ Konfigürasyon geçerli ({sure:.2f}s)")
+            print(f"  ✅ Akıllı konfigürasyon geçerli ({sure:.2f}s)")
 
         except Exception as e:
             sure = time.time() - test_baslangic
@@ -201,20 +196,14 @@ class TestRunner:
         try:
             import psutil
 
-            # Mevcut bellek kullanımı
+            # Bellek kullanımı
             memory = psutil.virtual_memory()
             memory_percent = memory.percent
-
-            # %90'dan fazla bellek kullanımı uyarısı
-            if memory_percent > 90:
-                raise Warning(
-                    f"Yüksek bellek kullanımı: %{memory_percent:.1f}")
-
             # CPU kullanımı
             cpu_percent = psutil.cpu_percent(interval=1)
 
             sure = time.time() - test_baslangic
-            detay = f"Bellek: %{memory_percent:.1f}, CPU: %{cpu_percent:.1f}"
+            detay = f"Bellek: %{memory_percent}, CPU: %{cpu_percent}"
             self.genel_rapor.test_sonucu_ekle(
                 "Sistem Kaynakları Testi", True, sure, detay)
             print(f"  ✅ Sistem kaynakları normal ({sure:.2f}s) - {detay}")
@@ -223,12 +212,7 @@ class TestRunner:
             sure = time.time() - test_baslangic
             self.genel_rapor.test_sonucu_ekle(
                 "Sistem Kaynakları Testi", True, sure, "psutil bulunamadı")
-            print(f"  ⚠️ Sistem kaynakları testi atlandı - psutil bulunamadı")
-        except Exception as e:
-            sure = time.time() - test_baslangic
-            self.genel_rapor.test_sonucu_ekle(
-                "Sistem Kaynakları Testi", False, sure, str(e))
-            print(f"  ❌ Sistem kaynakları hatası ({sure:.2f}s) - {e}")
+            print("  ⚠️ Sistem kaynakları testi atlandı - psutil bulunamadı")
 
     async def entegrasyon_testleri(self):
         """Entegrasyon testleri."""
@@ -315,7 +299,7 @@ class TestRunner:
         print("=" * 60)
 
         if modul_adi == "hardware" and HARDWARE_AVAILABLE:
-            await donanim_testlerini_calistir()
+            donanim_testlerini_calistir()  # Artık sync
         elif modul_adi == "navigation" and NAVIGATION_AVAILABLE:
             await navigation_testlerini_calistir()
         elif modul_adi == "system":

@@ -278,10 +278,18 @@
 - Değiştirme gereksinimi
 
 ⚙️ Kalibrasyon:
-- IMU sensör kalibrasyonu
-- GPS referans noktası güncelle
-- Kamera focus ayarı
-- Motor encoder kalibrasyonu
+- 📏 **Encoder Kalibrasyonu**: `python scripts/encoder_calibration.py --interactive`
+  - Mesafe kalibrasyonu
+  - Dönüş kalibrasyonu
+  - Doğrulama testleri
+- 📷 **Kamera Kalibrasyonu**: `python scripts/camera_calibration.py --tam`
+  - Chessboard kalibrasyonu
+  - AprilTag optimizasyonu
+  - Lens distorsiyon düzeltmesi
+- 🧭 **IMU Sensör Kalibrasyonu** (Gelecek)
+- 🛰️ **GPS Referans Noktası Güncelleme** (Gelecek)
+
+📚 **Detaylı Kalibrasyon Rehberi**: [docs/calibration/README.md](calibration/README.md)
 
 🧪 Performans testleri:
 - Hız ve hassasiyet testleri

@@ -48,14 +48,14 @@ class BahceSinirKontrol:
         self.config = sinir_config
 
         # Sınır koordinatları
-        self.boundary_points = self._load_boundary_coordinates()
+        self.sinir_noktalari = self._sinir_koordinatlarini_yukle()
 
         # Güvenlik parametreleri
-        safety_config = sinir_config.get("boundary_safety", {})
-        self.buffer_distance = safety_config.get("buffer_distance", 1.0)
-        self.warning_distance = safety_config.get("warning_distance", 2.0)
-        self.max_deviation = safety_config.get("max_deviation", 0.5)
-        self.check_frequency = safety_config.get("check_frequency", 10)
+        guvenlik_config = sinir_config.get("boundary_safety", {})
+        self.buffer_distance = guvenlik_config.get("buffer_distance", 1.0)
+        self.warning_distance = guvenlik_config.get("warning_distance", 2.0)
+        self.max_deviation = guvenlik_config.get("max_deviation", 0.5)
+        self.check_frequency = guvenlik_config.get("check_frequency", 10)
 
         # İstatistikler
         self.toplam_kontrol_sayisi = 0
@@ -63,15 +63,15 @@ class BahceSinirKontrol:
         self.son_kontrol_zamani = 0
 
         self.logger.info("🏡 Bahçe sınır kontrol sistemi başlatıldı")
-        self.logger.info(f"📍 Sınır noktaları: {len(self.boundary_points)} nokta")
+        self.logger.info(f"📍 Sınır noktaları: {len(self.sinir_noktalari)} nokta")
         self.logger.info(f"🛡️ Güvenlik buffer: {self.buffer_distance}m")
         self.logger.info(f"⚠️ Uyarı mesafesi: {self.warning_distance}m")
 
         # Bahçe alanını hesapla
-        self.bahce_alani = self._calculate_polygon_area()
+        self.bahce_alani = self._polygon_alanini_hesapla()
         self.logger.info(f"🌱 Bahçe alanı: {self.bahce_alani:.2f} m²")
 
-    def _load_boundary_coordinates(self) -> List[KoordinatNoktasi]:
+    def _sinir_koordinatlarini_yukle(self) -> List[KoordinatNoktasi]:
         """Konfigürasyondan sınır koordinatlarını yükle"""
         koordinatlar = []
 
@@ -90,50 +90,50 @@ class BahceSinirKontrol:
 
         return koordinatlar
 
-    def _calculate_polygon_area(self) -> float:
+    def _polygon_alanini_hesapla(self) -> float:
         """Polygon alanını hesapla (Shoelace formula)"""
-        if len(self.boundary_points) < 3:
+        if len(self.sinir_noktalari) < 3:
             return 0.0
 
         # GPS koordinatlarını metre cinsine çevir (yaklaşık)
-        points_meters = []
-        ref_lat = self.boundary_points[0].latitude
-        ref_lon = self.boundary_points[0].longitude
+        metre_noktalari = []
+        ref_lat = self.sinir_noktalari[0].latitude
+        ref_lon = self.sinir_noktalari[0].longitude
 
-        for point in self.boundary_points:
-            x = self._haversine_distance(ref_lat, ref_lon, ref_lat, point.longitude)
-            y = self._haversine_distance(ref_lat, ref_lon, point.latitude, ref_lon)
-            points_meters.append((x, y))
+        for nokta in self.sinir_noktalari:
+            x = self._haversine_mesafe(ref_lat, ref_lon, ref_lat, nokta.longitude)
+            y = self._haversine_mesafe(ref_lat, ref_lon, nokta.latitude, ref_lon)
+            metre_noktalari.append((x, y))
 
         # Shoelace formula
-        area = 0.0
-        n = len(points_meters)
+        alan = 0.0
+        n = len(metre_noktalari)
         for i in range(n):
             j = (i + 1) % n
-            area += points_meters[i][0] * points_meters[j][1]
-            area -= points_meters[j][0] * points_meters[i][1]
+            alan += metre_noktalari[i][0] * metre_noktalari[j][1]
+            alan -= metre_noktalari[j][0] * metre_noktalari[i][1]
 
-        return abs(area) / 2.0
+        return abs(alan) / 2.0
 
-    def robot_konumunu_kontrol_et(self, current_lat: float, current_lon: float) -> SinirKontrolSonucu:
+    def robot_konumunu_kontrol_et(self, mevcut_lat: float, mevcut_lon: float) -> SinirKontrolSonucu:
         """
         🎯 Robot konumunu kontrol et
 
         Args:
-            current_lat: Mevcut GPS latitude
-            current_lon: Mevcut GPS longitude
+            mevcut_lat: Mevcut GPS latitude
+            mevcut_lon: Mevcut GPS longitude
 
         Returns:
             SinirKontrolSonucu: Kontrol sonucu
         """
         self.toplam_kontrol_sayisi += 1
-        mevcut_konum = KoordinatNoktasi(current_lat, current_lon)
+        mevcut_konum = KoordinatNoktasi(mevcut_lat, mevcut_lon)
 
         # Point-in-polygon kontrolü
-        polygon_icinde = self._point_in_polygon(mevcut_konum)
+        polygon_icinde = self._nokta_polygon_icinde_mi(mevcut_konum)
 
         # Sınıra en yakın mesafe
-        en_yakin_mesafe, en_yakin_nokta = self._find_nearest_boundary_point(mevcut_konum)
+        en_yakin_mesafe, en_yakin_nokta = self._en_yakin_sinir_noktasini_bul(mevcut_konum)
 
         # Güvenlik seviyesi belirleme
         if not polygon_icinde:
@@ -164,7 +164,7 @@ class BahceSinirKontrol:
         # Güvenli yön önerisi
         onerilenen_yon = None
         if not guvenli_bolgede:
-            onerilenen_yon = self._calculate_safe_direction(mevcut_konum, en_yakin_nokta)
+            onerilenen_yon = self._guvenli_yon_hesapla(mevcut_konum, en_yakin_nokta)
 
         sonuc = SinirKontrolSonucu(
             guvenli_bolgede=guvenli_bolgede,
@@ -185,27 +185,27 @@ class BahceSinirKontrol:
 
         return sonuc
 
-    def _point_in_polygon(self, point: KoordinatNoktasi) -> bool:
+    def _nokta_polygon_icinde_mi(self, nokta: KoordinatNoktasi) -> bool:
         """
         Point-in-polygon algoritması (Ray casting)
 
         Args:
-            point: Kontrol edilecek nokta
+            nokta: Kontrol edilecek nokta
 
         Returns:
             bool: Nokta polygon içinde mi?
         """
-        if len(self.boundary_points) < 3:
+        if len(self.sinir_noktalari) < 3:
             return False
 
-        x, y = point.longitude, point.latitude
-        n = len(self.boundary_points)
-        inside = False
+        x, y = nokta.longitude, nokta.latitude
+        n = len(self.sinir_noktalari)
+        icinde = False
 
-        p1x, p1y = self.boundary_points[0].longitude, self.boundary_points[0].latitude
+        p1x, p1y = self.sinir_noktalari[0].longitude, self.sinir_noktalari[0].latitude
 
         for i in range(1, n + 1):
-            p2x, p2y = self.boundary_points[i % n].longitude, self.boundary_points[i % n].latitude
+            p2x, p2y = self.sinir_noktalari[i % n].longitude, self.sinir_noktalari[i % n].latitude
 
             if y > min(p1y, p2y):
                 if y <= max(p1y, p2y):
@@ -213,68 +213,68 @@ class BahceSinirKontrol:
                         if p1y != p2y:
                             xinters = (y - p1y) * (p2x - p1x) / (p2y - p1y) + p1x
                         if p1x == p2x or x <= xinters:
-                            inside = not inside
+                            icinde = not icinde
 
             p1x, p1y = p2x, p2y
 
-        return inside
+        return icinde
 
-    def _find_nearest_boundary_point(self, point: KoordinatNoktasi) -> Tuple[float, KoordinatNoktasi]:
+    def _en_yakin_sinir_noktasini_bul(self, nokta: KoordinatNoktasi) -> Tuple[float, KoordinatNoktasi]:
         """
         En yakın sınır noktasını bul
 
         Args:
-            point: Referans nokta
+            nokta: Referans nokta
 
         Returns:
             Tuple[float, KoordinatNoktasi]: (mesafe, nokta)
         """
-        min_distance = float('inf')
-        nearest_point = self.boundary_points[0]
+        min_mesafe = float('inf')
+        en_yakin_nokta = self.sinir_noktalari[0]
 
-        for boundary_point in self.boundary_points:
-            distance = self._haversine_distance(
-                point.latitude, point.longitude,
-                boundary_point.latitude, boundary_point.longitude
+        for sinir_noktasi in self.sinir_noktalari:
+            mesafe = self._haversine_mesafe(
+                nokta.latitude, nokta.longitude,
+                sinir_noktasi.latitude, sinir_noktasi.longitude
             )
 
-            if distance < min_distance:
-                min_distance = distance
-                nearest_point = boundary_point
+            if mesafe < min_mesafe:
+                min_mesafe = mesafe
+                en_yakin_nokta = sinir_noktasi
 
-        return min_distance, nearest_point
+        return min_mesafe, en_yakin_nokta
 
-    def _calculate_safe_direction(self, current_point: KoordinatNoktasi,
-                                  nearest_boundary: KoordinatNoktasi) -> float:
+    def _guvenli_yon_hesapla(self, mevcut_nokta: KoordinatNoktasi,
+                             en_yakin_sinir: KoordinatNoktasi) -> float:
         """
         Güvenli yön hesapla (sınırdan uzaklaşma yönü)
 
         Args:
-            current_point: Mevcut konum
-            nearest_boundary: En yakın sınır noktası
+            mevcut_nokta: Mevcut konum
+            en_yakin_sinir: En yakın sınır noktası
 
         Returns:
             float: Güvenli yön (radyan)
         """
         # Sınır noktasından uzaklaşma yönü
-        delta_lat = current_point.latitude - nearest_boundary.latitude
-        delta_lon = current_point.longitude - nearest_boundary.longitude
+        delta_lat = mevcut_nokta.latitude - en_yakin_sinir.latitude
+        delta_lon = mevcut_nokta.longitude - en_yakin_sinir.longitude
 
         # Bahçe merkezini hesapla
-        center_lat = sum(p.latitude for p in self.boundary_points) / len(self.boundary_points)
-        center_lon = sum(p.longitude for p in self.boundary_points) / len(self.boundary_points)
+        merkez_lat = sum(p.latitude for p in self.sinir_noktalari) / len(self.sinir_noktalari)
+        merkez_lon = sum(p.longitude for p in self.sinir_noktalari) / len(self.sinir_noktalari)
 
         # Merkeze doğru yön
-        to_center_lat = center_lat - current_point.latitude
-        to_center_lon = center_lon - current_point.longitude
+        merkeze_lat = merkez_lat - mevcut_nokta.latitude
+        merkeze_lon = merkez_lon - mevcut_nokta.longitude
 
         # Ağırlıklı güvenli yön
-        safe_direction = math.atan2(to_center_lat * 0.7 + delta_lat * 0.3,
-                                    to_center_lon * 0.7 + delta_lon * 0.3)
+        guvenli_yon = math.atan2(merkeze_lat * 0.7 + delta_lat * 0.3,
+                                 merkeze_lon * 0.7 + delta_lon * 0.3)
 
-        return safe_direction
+        return guvenli_yon
 
-    def _haversine_distance(self, lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    def _haversine_mesafe(self, lat1: float, lon1: float, lat2: float, lon2: float) -> float:
         """
         Haversine formülü ile iki GPS koordinatı arasındaki mesafe
 
@@ -298,49 +298,49 @@ class BahceSinirKontrol:
 
         return R * c
 
-    def get_boundary_center(self) -> KoordinatNoktasi:
+    def bahce_merkezini_al(self) -> KoordinatNoktasi:
         """Bahçe merkezini hesapla"""
-        if not self.boundary_points:
+        if not self.sinir_noktalari:
             return KoordinatNoktasi(0, 0)
 
-        center_lat = sum(p.latitude for p in self.boundary_points) / len(self.boundary_points)
-        center_lon = sum(p.longitude for p in self.boundary_points) / len(self.boundary_points)
+        merkez_lat = sum(p.latitude for p in self.sinir_noktalari) / len(self.sinir_noktalari)
+        merkez_lon = sum(p.longitude for p in self.sinir_noktalari) / len(self.sinir_noktalari)
 
-        return KoordinatNoktasi(center_lat, center_lon)
+        return KoordinatNoktasi(merkez_lat, merkez_lon)
 
-    def get_boundary_stats(self) -> Dict[str, Any]:
+    def sinir_istatistiklerini_al(self) -> Dict[str, Any]:
         """Sınır kontrol istatistiklerini al"""
         return {
             "toplam_kontrol": self.toplam_kontrol_sayisi,
             "sinir_ihlali": self.sinir_ihlali_sayisi,
             "ihlal_orani": (self.sinir_ihlali_sayisi / max(1, self.toplam_kontrol_sayisi)) * 100,
             "bahce_alani": self.bahce_alani,
-            "sinir_nokta_sayisi": len(self.boundary_points),
+            "sinir_nokta_sayisi": len(self.sinir_noktalari),
             "buffer_mesafesi": self.buffer_distance,
             "uyari_mesafesi": self.warning_distance
         }
 
-    def visualize_boundary_for_web(self) -> Dict[str, Any]:
+    def web_icin_sinir_verilerini_hazirla(self) -> Dict[str, Any]:
         """Web arayüzü için sınır verilerini hazırla"""
-        boundary_data = []
+        sinir_verileri = []
 
-        for point in self.boundary_points:
-            boundary_data.append({
-                "lat": point.latitude,
-                "lon": point.longitude
+        for nokta in self.sinir_noktalari:
+            sinir_verileri.append({
+                "lat": nokta.latitude,
+                "lon": nokta.longitude
             })
 
-        center = self.get_boundary_center()
+        merkez = self.bahce_merkezini_al()
 
         return {
-            "boundary_points": boundary_data,
-            "center": {"lat": center.latitude, "lon": center.longitude},
+            "boundary_points": sinir_verileri,
+            "center": {"lat": merkez.latitude, "lon": merkez.longitude},
             "area": self.bahce_alani,
             "buffer_distance": self.buffer_distance,
             "warning_distance": self.warning_distance
         }
 
-    def get_current_boundary_status_for_web(self, current_lat: float, current_lon: float) -> Dict[str, Any]:
+    def get_current_boundary_status_for_web(self, mevcut_lat: float, mevcut_lon: float) -> Dict[str, Any]:
         """
         🌐 Web arayüzü için mevcut sınır durumunu al
 
@@ -348,13 +348,13 @@ class BahceSinirKontrol:
         Tüm hesaplamalar burada yapılır, web server sadece formatlamakla uğraşır.
 
         Args:
-            current_lat: Mevcut GPS latitude
-            current_lon: Mevcut GPS longitude
+            mevcut_lat: Mevcut GPS latitude
+            mevcut_lon: Mevcut GPS longitude
 
         Returns:
             Dict: Web API formatında sınır durumu
         """
-        if not self.boundary_points:
+        if not self.sinir_noktalari:
             return {
                 "active": False,
                 "distance_to_fence": None,
@@ -368,7 +368,7 @@ class BahceSinirKontrol:
 
         try:
             # Sınır kontrolü yap
-            kontrol_sonucu = self.robot_konumunu_kontrol_et(current_lat, current_lon)
+            kontrol_sonucu = self.robot_konumunu_kontrol_et(mevcut_lat, mevcut_lon)
 
             # Uyarı seviyesini web formatına çevir
             web_status = self._convert_uyari_to_web_status(kontrol_sonucu.uyari_seviyesi)

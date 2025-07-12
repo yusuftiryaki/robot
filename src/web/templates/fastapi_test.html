@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="tr">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🤖 OBA FastAPI Test</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🤖 OBA FastAPI Test Paneli</h1>
+            <p>Hacı Abi'nin FastAPI test arayüzü</p>
+            <div>Bağlantı Durumu: <span id="connection-status">Kontrol ediliyor...</span></div>
+        </div>
+
+        <div class="status-grid">
+            <div class="status-card">
+                <h3>🤖 Robot Durumu</h3>
+                <p><strong>Durum:</strong> <span id="robot-state">Yükleniyor...</span></p>
+                <p><strong>Batarya:</strong> <span id="battery-level">--%</span></p>
+                <p><strong>Son Güncelleme:</strong> <span id="last-update">--:--:--</span></p>
+            </div>
+
+            <div class="status-card">
+                <h3>📍 Konum Bilgisi</h3>
+                <p><strong>X:</strong> <span id="position-x">0.00</span> m</p>
+                <p><strong>Y:</strong> <span id="position-y">0.00</span> m</p>
+                <p><strong>GPS:</strong> <span id="gps-lat">0.000000</span>, <span id="gps-lng">0.000000</span></p>
+            </div>
+
+            <div class="status-card">
+                <h3>⚙️ Motor Durumu</h3>
+                <p><strong>Sol Motor:</strong> <span id="motor-left">0.00</span></p>
+                <p><strong>Sağ Motor:</strong> <span id="motor-right">0.00</span></p>
+            </div>
+        </div>
+
+        <div class="button-grid">
+            <button class="btn btn-success" data-command="start_mission">🚀 Görevi Başlat</button>
+            <button class="btn btn-warning" data-command="stop_mission">⏹️ Görevi Durdur</button>
+            <button class="btn btn-danger" data-command="emergency_stop">🚨 Acil Durdur</button>
+
+            <button class="btn btn-primary" data-command="set_brushes" data-params='{"active": true}'>🧹 Fırçaları
+                Aç</button>
+            <button class="btn btn-primary" data-command="set_brushes" data-params='{"active": false}'>🧹 Fırçaları
+                Kapat</button>
+
+            <button class="btn btn-primary" data-command="set_fan" data-params='{"active": true}'>💨 Fanı Aç</button>
+            <button class="btn btn-primary" data-command="set_fan" data-params='{"active": false}'>💨 Fanı
+                Kapat</button>
+
+            <button class="btn btn-primary" data-command="return_to_dock">🔋 Şarj İstasyonuna Git</button>
+        </div>
+
+        <div class="status-card" style="margin-top: 30px;">
+            <h3>📊 FastAPI Test Bilgileri</h3>
+            <p><strong>API Docs:</strong> <a href="/docs" target="_blank">/docs</a></p>
+            <p><strong>Interactive API:</strong> <a href="/redoc" target="_blank">/redoc</a></p>
+            <p><strong>Robot Status:</strong> <a href="/api/robot/status" target="_blank">/api/robot/status</a></p>
+            <p><strong>WebSocket Test:</strong> ws://localhost:8000/ws</p>
+        </div>
+    </div>
+
+    <script src="/static/js/robot.js"></script>
+</body>
+
+</html>

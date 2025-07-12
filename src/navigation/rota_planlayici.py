@@ -113,8 +113,136 @@ class RotaPlanlayici:
         mowing_config = nav_config.get("missions", {}).get("mowing", {})
         self.bicme_overlap = mowing_config.get("overlap", 0.1)  # 10cm örtüşme
         self.bicme_hiz = mowing_config.get("speed", 0.3)  # 0.3 m/s
+        self.firca_genisligi = mowing_config.get("brush_width", 0.25)  # 25cm fırça genişliği
+
+        # GPS şarj istasyonu parametreleri (config'ten al)
+        charging_config = nav_config.get("charging", {})
+        gps_dock_config = charging_config.get("gps_dock", {})
+
+        self.gps_hassas_mesafe = gps_dock_config.get("precise_approach_distance", 0.5)
+        self.gps_orta_mesafe = gps_dock_config.get("medium_distance_threshold", 10.0)
+        self.apriltag_menzil = gps_dock_config.get("apriltag_detection_range", 0.5)
+
+        # Yaklaşım hızları
+        approach_speeds = gps_dock_config.get("approach_speeds", {})
+        self.hiz_normal = approach_speeds.get("normal", 0.3)
+        self.hiz_yavas = approach_speeds.get("slow", 0.2)
+        self.hiz_cok_yavas = approach_speeds.get("very_slow", 0.1)
+        self.hiz_ultra_yavas = approach_speeds.get("ultra_slow", 0.05)
+        self.hiz_hassas = approach_speeds.get("precise", 0.02)
+
+        # 🏡 Config'ten bahçe koordinatlarını al ve çalışma alanını ayarla
+        self._config_bahce_koordinatlari_yukle()
 
         self.logger.info("🗺️ Rota planlayıcı başlatıldı")
+
+    def _config_bahce_koordinatlari_yukle(self):
+        """
+        🏡 Config'ten bahçe koordinatlarını yükle ve çalışma alanını ayarla
+        """
+        try:
+            # Bahçe sınır koordinatları
+            boundary_coords = self.config.get("boundary_coordinates", [])
+
+            if not boundary_coords or len(boundary_coords) < 3:
+                self.logger.warning("⚠️ Config'te yeterli bahçe koordinatı bulunamadı, varsayılan alan kullanılıyor")
+                self._varsayilan_alan_ayarla()
+                return
+
+            # GPS koordinatlarını metre sistemine çevir
+            metre_koordinatlari = self._gps_koordinatlari_to_metre(boundary_coords)
+
+            if not metre_koordinatlari:
+                self.logger.error("❌ GPS koordinatları metre sistemine çevrilemedi")
+                self._varsayilan_alan_ayarla()
+                return
+
+            # Minimum ve maksimum koordinatları bul (bounding box)
+            min_x = min(nokta.x for nokta in metre_koordinatlari)
+            max_x = max(nokta.x for nokta in metre_koordinatlari)
+            min_y = min(nokta.y for nokta in metre_koordinatlari)
+            max_y = max(nokta.y for nokta in metre_koordinatlari)
+
+            # Güvenlik buffer'ı ekle
+            boundary_safety = self.config.get("missions", {}).get("boundary_safety", {})
+            buffer_distance = boundary_safety.get("buffer_distance", 1.0)
+
+            min_x -= buffer_distance
+            max_x += buffer_distance
+            min_y -= buffer_distance
+            max_y += buffer_distance
+
+            # Alan objesi oluştur
+            bahce_alani = Alan(
+                sol_alt=Nokta(min_x, min_y),
+                sag_ust=Nokta(max_x, max_y),
+                engeller=[]  # Başlangıçta engel yok, sensor'lerden gelecek
+            )
+
+            # Çalışma alanını ayarla
+            self.calisma_alanini_ayarla(bahce_alani)
+
+            self.logger.info(f"🏡 Bahçe alanı config'ten yüklendi: {max_x-min_x:.1f}m x {max_y-min_y:.1f}m")
+            self.logger.info(f"📍 {len(boundary_coords)} GPS koordinatı işlendi")
+
+        except Exception as e:
+            self.logger.error(f"❌ Bahçe koordinatları yükleme hatası: {e}")
+            self._varsayilan_alan_ayarla()
+
+    def _gps_koordinatlari_to_metre(self, gps_coords: List[Dict[str, float]]) -> List[Nokta]:
+        """
+        🌍 GPS koordinatlarını local metre sistemine çevir
+
+        Args:
+            gps_coords: GPS koordinat listesi [{"latitude": ..., "longitude": ...}]
+
+        Returns:
+            Liste[Nokta]: Metre cinsinden koordinatlar
+        """
+        if not gps_coords:
+            return []
+
+        # Referans nokta olarak ilk koordinatı kullan
+        ref_lat = gps_coords[0]["latitude"]
+        ref_lon = gps_coords[0]["longitude"]
+
+        metre_noktalari = []
+
+        for coord in gps_coords:
+            lat = coord.get("latitude")
+            lon = coord.get("longitude")
+
+            if lat is None or lon is None:
+                self.logger.warning(f"⚠️ Eksik GPS koordinatı atlandı: {coord}")
+                continue
+
+            # Basit GPS → metre dönüşümü (küçük alanlar için yeterli)
+            # Haversine formülü yerine düz projeksiyon (daha hızlı)
+            lat_diff = lat - ref_lat
+            lon_diff = lon - ref_lon
+
+            # Yaklaşık dönüşüm sabitleri (orta enlemler için)
+            x = lon_diff * 111320.0 * math.cos(math.radians(ref_lat))  # Doğu-Batı
+            y = lat_diff * 110540.0  # Kuzey-Güney
+
+            metre_noktalari.append(Nokta(x, y))
+
+        self.logger.debug(f"🗺️ {len(metre_noktalari)} GPS koordinatı metre sistemine çevrildi")
+        return metre_noktalari
+
+    def _varsayilan_alan_ayarla(self):
+        """
+        🏠 Varsayılan bahçe alanını ayarla (config olmadığında)
+        """
+        self.logger.info("🏠 Varsayılan bahçe alanı kullanılıyor")
+
+        varsayilan_alan = Alan(
+            sol_alt=Nokta(0.0, 0.0),      # Sol-alt köşe
+            sag_ust=Nokta(20.0, 15.0),    # Sağ-üst köşe (20m x 15m)
+            engeller=[]                    # Başlangıçta engel yok
+        )
+
+        self.calisma_alanini_ayarla(varsayilan_alan)
 
     def calisma_alanini_ayarla(self, alan: Alan):
         """
@@ -171,7 +299,8 @@ class RotaPlanlayici:
                 gy = grid_y + dy
 
                 if 0 <= gx < self.grid_genislik and 0 <= gy < self.grid_yukseklik:
-                    self.engel_grid[gy, gx] = True
+                    if self.engel_grid is not None:
+                        self.engel_grid[gy, gx] = True
 
     def sarj_istasyonu_ayarla(self, konum: Nokta):
         """🔌 Şarj istasyonu konumunu ayarla"""
@@ -194,8 +323,7 @@ class RotaPlanlayici:
         rota_noktalari: List[RotaNoktasi] = []
 
         # Biçme şerit genişliği (fırça genişliği - örtüşme)
-        fir_ca_genisligi = 0.25  # Mi Robot fırça genişliği yaklaşık 25cm
-        serit_genisligi = fir_ca_genisligi - self.bicme_overlap
+        serit_genisligi = self.firca_genisligi - self.bicme_overlap
 
         # Alanın sol alt köşesinden başla
         baslangic_x = self.calisma_alani.sol_alt.x
@@ -417,7 +545,7 @@ class RotaPlanlayici:
         path.reverse()
         return path
 
-    async def sarj_istasyonu_rotasi(self, konum_takipci=None, gps_dock_config: Dict[str, Any] = None) -> Optional[List[RotaNoktasi]]:
+    async def sarj_istasyonu_rotasi(self, konum_takipci=None, gps_dock_config: Optional[Dict[str, Any]] = None) -> Optional[List[RotaNoktasi]]:
         """
         🔋 GPS destekli şarj istasyonu rotası oluştur
 
@@ -457,7 +585,7 @@ class RotaPlanlayici:
         if mesafe <= gps_accuracy:
             # Şarj istasyonu GPS hata payı içinde - hassas yaklaşım
             return await self._hassas_sarj_yaklasimu(mevcut_konum, dock_lat, dock_lon, konum_takipci)
-        elif mesafe <= 10.0:
+        elif mesafe <= self.gps_orta_mesafe:
             # Orta mesafe - GPS rehberli yaklaşım
             return await self._gps_rehberli_yaklaşım(mevcut_konum, dock_lat, dock_lon, konum_takipci)
         else:
@@ -484,14 +612,14 @@ class RotaPlanlayici:
             kalan_mesafe = math.sqrt((dock_x - x)**2 + (dock_y - y)**2)
 
             # Hız kontrolü - AprilTag menzilinde daha hassas
-            if kalan_mesafe <= 0.5:  # 50cm - AprilTag menzili
-                hiz = 0.02  # 2 cm/s - AprilTag hassas mod
+            if kalan_mesafe <= self.apriltag_menzil:  # AprilTag menzili
+                hiz = self.hiz_hassas  # Hassas mod
             elif progress > 0.8:
-                hiz = 0.05  # 5 cm/s - ultra yavaş
+                hiz = self.hiz_ultra_yavas  # Ultra yavaş
             elif progress > 0.6:
-                hiz = 0.1   # 10 cm/s - çok yavaş
+                hiz = self.hiz_cok_yavas   # Çok yavaş
             else:
-                hiz = 0.2   # 20 cm/s - yavaş
+                hiz = self.hiz_yavas   # Yavaş
 
             # Hedefe yön
             yon = konum_takipci.get_bearing_to_gps(dock_lat, dock_lon)
@@ -506,7 +634,7 @@ class RotaPlanlayici:
 
         # Son nokta: AprilTag yaklaşım başlangıcı
         apriltag_baslangic = RotaNoktasi(
-            nokta=Nokta(dock_x - 0.5, dock_y),  # 50cm önce dur
+            nokta=Nokta(dock_x - self.apriltag_menzil, dock_y),  # AprilTag menzili kadar önce dur
             yon=konum_takipci.get_bearing_to_gps(dock_lat, dock_lon),
             hiz=0.0,  # Dur ve AprilTag yaklaşım başlat
             aksesuar_aktif=False
@@ -536,11 +664,11 @@ class RotaPlanlayici:
             # Mesafeye göre hız ayarla
             kalan_mesafe = konum_takipci.get_mesafe_to_gps(dock_lat, dock_lon)
             if kalan_mesafe < 3.0:
-                hiz = 0.1  # Son 3m'de yavaş
+                hiz = self.hiz_cok_yavas  # Son 3m'de yavaş
             elif kalan_mesafe < 6.0:
-                hiz = 0.2  # Son 6m'de orta hız
+                hiz = self.hiz_yavas  # Son 6m'de orta hız
             else:
-                hiz = 0.3  # Normal hız
+                hiz = self.hiz_normal  # Normal hız
 
             yon = konum_takipci.get_bearing_to_gps(dock_lat, dock_lon)
 
@@ -585,11 +713,11 @@ class RotaPlanlayici:
             # Şarja yaklaştıkça yavaşla
             mesafe_kalan = self._distance(nokta, dock_nokta)
             if mesafe_kalan < 1.0:
-                hiz = 0.1  # Son 1m çok yavaş
+                hiz = self.hiz_cok_yavas  # Son 1m çok yavaş
             elif mesafe_kalan < 3.0:
-                hiz = 0.2  # Son 3m yavaş
+                hiz = self.hiz_yavas  # Son 3m yavaş
             else:
-                hiz = 0.3  # Normal hız
+                hiz = self.hiz_normal  # Normal hız
 
             rota_noktasi = RotaNoktasi(
                 nokta=nokta,
@@ -631,7 +759,7 @@ class RotaPlanlayici:
             rota_noktasi = RotaNoktasi(
                 nokta=nokta,
                 yon=yon,
-                hiz=0.2,  # Yavaş güvenli hız
+                hiz=self.hiz_yavas,  # Yavaş güvenli hız
                 aksesuar_aktif=False
             )
             sarj_rotasi.append(rota_noktasi)

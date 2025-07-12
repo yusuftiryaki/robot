@@ -179,6 +179,25 @@ chmod +x scripts/*
 oba-help
 ```
 
+### 4.4 Sistem Kalibrasyonu
+```bash
+# Sistem kalibrasyon süreci
+cd /home/pi/oba
+
+# 1. Encoder kalibrasyonu
+python scripts/encoder_calibration.py --interactive
+
+# 2. Kamera kalibrasyonu
+python scripts/camera_calibration.py --tam
+
+# 3. Sistem doğrulama
+python main.py --test-calibration
+```
+
+📚 **Detaylı Kalibrasyon Rehberi**: [docs/calibration/README.md](../calibration/README.md)
+
+⚠️ **DİKKAT**: Kalibrasyon olmadan robot doğru çalışmaz!
+
 ---
 
 ## 🚀 AŞAMA 5: SERVİS KURULUMU

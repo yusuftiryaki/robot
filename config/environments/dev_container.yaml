@@ -1,102 +1,100 @@
 # OBA Robot - Development Environment Configuration
 # Dev Container / Geliştirme Ortamı Ayarları
+# Bu dosya, robot_config.yaml'daki varsayılan ayarları geçersiz kılar.
 
+# =====================================
+# ⚙️ TEMEL AYARLAR
+# =====================================
 robot:
   name: "OBA Development"
   version: "1.0.0-dev"
 
 # =====================================
-# 🎮 SIMULATION SETTINGS
+# 🎮 SİMÜLASYON AYARLARI
 # =====================================
 simulation:
   enabled: true
-  visualization: true
-  mock_sensors: true
   real_time_factor: 1.0
 
 # =====================================
-# 🔧 HARDWARE EMULATION
+# 🚗 MOTOR KONTROLÜ
 # =====================================
 motors:
   type: "simulation"
-  mock_motors: true
-  simulation_params:
-    max_speed: 1.0
-    acceleration: 0.5
-    wheel_radius: 0.032 # meters
-    wheel_distance: 0.16 # meters
-
-sensors:
-  mock_enabled: true
-  simulation_sensors:
-    - type: "imu"
-      name: "main_imu"
-      update_rate: 100 # Hz
-    - type: "battery"
-      name: "main_battery"
-      initial_level: 85 # %
-      drain_rate: 0.1 # %/hour
+  driver: "l298n"
 
 # =====================================
-# 📷 CAMERA SETTINGS
+# 📡 SENSÖRLER
+# =====================================
+sensors:
+  simulation_mode: true
+
+  # Simülasyon için mock sensörler
+  i2c:
+    devices:
+      - type: "mpu6050"
+        address: 0x68
+        name: "main_imu"
+        enabled: true
+      - type: "ina219"
+        address: 0x40
+        name: "battery_monitor"
+        enabled: true
+        shunt_ohms: 0.1
+        max_expected_amps: 10.0
+        description: "Simüle edilmiş batarya takibi"
+      - type: "ina219"
+        address: 0x41
+        name: "charging_monitor"
+        enabled: true
+        shunt_ohms: 0.1
+        max_expected_amps: 3.0
+        description: "Simüle edilmiş şarj kontrolü"
+
+  gpio:
+    devices:
+      - type: "button"
+        pin: 15
+        name: "acil_durma"
+        enabled: true
+        pull_up: true
+      - type: "button"
+        pin: 14
+        name: "tampon"
+        enabled: true
+        pull_up: true
+
+# =====================================
+# 📷 KAMERA
 # =====================================
 camera:
-  enabled: true
   type: "simulation"
-  device_id: 0
-  resolution:
-    width: 640
-    height: 480
-  fps: 30
-  auto_exposure: true
-  simulation_params:
-    test_pattern: true
-    noise_level: 0.05
+  device: "simulated_camera"
 
 # =====================================
-# 🌐 WEB INTERFACE
+# ⚡ PERFORMANS
+# =====================================
+performance:
+  loop_frequency: 50 # Hz - development için yüksek
+
+# =====================================
+# 🌐 WEB ARAYÜZÜ
 # =====================================
 web_interface:
-  enabled: true
-  host: "0.0.0.0" # Dev container'da dışarıdan erişim
-  port: 5000
-  debug: false
-  auto_reload: true
   cors_enabled: true
+  host: "0.0.0.0"
 
 # =====================================
-# 📊 LOGGING
+# 📊 LOGLAMA
 # =====================================
 logging:
-  level: "INFO"
+  level: "DEBUG" # Geliştirme için detaylı loglama
   console:
-    enabled: true
-    colored: true
-    format: "%(asctime)s | %(name)s | %(levelname)s | %(message)s"
-  file:
-    enabled: false
-    path: "/workspaces/oba/logs"
-    filename: "robot_dev.log"
-    max_size: "10MB"
-    backup_count: 5
-    rotation: "time"
+    colored: true # Dev container renkleri destekler
 
 # =====================================
-# 🤖 AI/ML SETTINGS
+# 🛡️ GÜVENLİK
 # =====================================
-ai:
-  enabled: true
-  debug_mode: true
-  model_path: "/workspaces/oba/models"
-  use_cpu: true # Dev ortamında CPU kullan
-  confidence_threshold: 0.5
-
-# =====================================
-# 📁 DATA PATHS
-# =====================================
-paths:
-  data: "/workspaces/oba/data"
-  logs: "/workspaces/oba/logs"
-  models: "/workspaces/oba/models"
-  config: "/workspaces/oba/config"
-  temp: "/workspaces/oba/temp"
+safety:
+  collision_detection:
+    distance_threshold: 0.20 # Simülasyon için daha toleranslı

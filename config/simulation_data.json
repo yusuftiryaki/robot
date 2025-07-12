@@ -1,0 +1,74 @@
+{
+    "version": "1.0.0",
+    "description": "OBA Robot Simülasyon Verileri",
+    "last_updated": "2025-07-09",
+    "imu": {
+        "ivme_x": 0.1,
+        "ivme_y": 0.0,
+        "ivme_z": 9.8,
+        "acisal_hiz_x": 0.0,
+        "acisal_hiz_y": 0.01,
+        "acisal_hiz_z": 0.0,
+        "roll": 0.0,
+        "pitch": 0.0,
+        "yaw": 0.0,
+        "sicaklik": 25.0,
+        "noise_level": 0.02,
+        "update_rate": 100
+    },
+    "gps": {
+        "enlem": 41.008150,
+        "boylam": 28.978550,
+        "yukseklik": 856.0,
+        "uydu_sayisi": 8,
+        "fix_kalitesi": 3,
+        "hiz": 0.0,
+        "yön": 0.0,
+        "accuracy": 2.5,
+        "update_rate": 1
+    },
+    "guc": {
+        "voltaj": 12.5,
+        "akim": -0.5,
+        "guc": 6.25,
+        "batarya_seviyesi": 85.0,
+        "min_voltage": 10.5,
+        "max_voltage": 12.6,
+        "idle_current": -0.2,
+        "moving_current": -1.5,
+        "charge_current": 2.0,
+        "discharge_rate": 0.01
+    },
+    "tampon": {
+        "basildi": false,
+        "debounce_time": 50,
+        "collision_probability": 0.1
+    },
+    "enkoder": {
+        "sol_teker": 0,
+        "sag_teker": 0,
+        "pulse_per_revolution": 1000,
+        "wheel_diameter": 0.066,
+        "wheel_base": 0.235,
+        "noise_factor": 0.02
+    },
+    "acil_durma": {
+        "aktif": false,
+        "auto_trigger_probability": 0.001
+    },
+    "environment": {
+        "temperature": 25.0,
+        "humidity": 60.0,
+        "lighting": 500,
+        "ground_roughness": 0.1,
+        "magnetic_declination": 5.2
+    },
+    "robot_dynamics": {
+        "max_linear_speed": 0.5,
+        "max_angular_speed": 2.0,
+        "acceleration": 0.2,
+        "deceleration": 0.3,
+        "mass": 5.0,
+        "moment_of_inertia": 0.1
+    }
+}

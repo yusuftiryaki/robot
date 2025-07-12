@@ -19,6 +19,9 @@ from typing import Any, Dict, List, Optional, Tuple
 import cv2
 import numpy as np
 
+# Rota planlayıcı import
+from .rota_planlayici import RotaNoktasi, RotaPlanlayici
+
 try:
     from ina219 import INA219
     INA219_AVAILABLE = True
@@ -29,13 +32,14 @@ except ImportError:
 
 class SarjYaklasimDurumu(Enum):
     """Şarj yaklaşım durum makinesi"""
-    ARAMA = "arama"                    # AprilTag arama
-    TESPIT = "tespit"                  # AprilTag tespit edildi
-    YAKLASIM = "yaklasim"              # Yaklaşım başladı
-    HASSAS_KONUMLANDIRMA = "hassas"    # Hassas konumlandırma
-    FIZIKSEL_BAGLANTI = "baglanti"     # Fiziksel bağlantı kontrolü
-    TAMAMLANDI = "tamamlandi"          # Şarj başladı
-    HATA = "hata"                      # Hata durumu
+    GPS_NAVIGASYON = "gps_navigasyon"      # GPS ile uzak yaklaşım
+    ARAMA = "arama"                        # AprilTag arama
+    TESPIT = "tespit"                      # AprilTag tespit edildi
+    YAKLASIM = "yaklasim"                  # Yaklaşım başladı
+    HASSAS_KONUMLANDIRMA = "hassas"        # Hassas konumlandırma
+    FIZIKSEL_BAGLANTI = "baglanti"         # Fiziksel bağlantı kontrolü
+    TAMAMLANDI = "tamamlandi"              # Şarj başladı
+    HATA = "hata"                          # Hata durumu
 
 
 @dataclass
@@ -67,41 +71,75 @@ class SarjIstasyonuYaklasici:
     AprilTag vision ve INA219 güç sensörü ile tam otomatik şarj.
     """
 
-    def __init__(self, sarj_config: Dict[str, Any]):
+    def __init__(self, sarj_config: Dict[str, Any], nav_config: Optional[Dict[str, Any]] = None, konum_takipci=None):
         self.config = sarj_config
         self.logger = logging.getLogger("SarjIstasyonuYaklasici")
+
+        # GPS + Rota Planlayıcı entegrasyonu
+        self.nav_config = nav_config
+        self.konum_takipci = konum_takipci
+        self.rota_planlayici: Optional[RotaPlanlayici] = None
+        self.gps_rotasi: List[RotaNoktasi] = []
+        self.rota_index = 0
+
+        # GPS şarj istasyonu ayarları
+        self.gps_dock_config = sarj_config.get("gps_dock", {})
+        self.gps_dock_lat = self.gps_dock_config.get("latitude")
+        self.gps_dock_lon = self.gps_dock_config.get("longitude")
+        self.gps_accuracy = self.gps_dock_config.get("accuracy_radius", 3.0)
+        self.apriltag_transition_distance = self.gps_dock_config.get("apriltag_detection_range", 0.5)
+
+        # Eğer GPS ve nav config varsa rota planlayıcıyı başlat
+        if nav_config and self.gps_dock_lat and self.gps_dock_lon:
+            self.rota_planlayici = RotaPlanlayici(nav_config)
+            self.logger.info("🗺️ GPS + AprilTag hibrit sistemi aktif")
+        else:
+            self.logger.info("🏷️ Sadece AprilTag sistemi aktif")
 
         # AprilTag parametreleri
         self.apriltag_config = sarj_config.get("apriltag", {})
         self.hedef_tag_id = self.apriltag_config.get("sarj_istasyonu_tag_id", 0)
-        self.kamera_matrix = np.array(self.apriltag_config.get("kamera_matrix", [
-            [640, 0, 320],
-            [0, 640, 240],
-            [0, 0, 1]
-        ]), dtype=np.float32)
-        self.distortion_coeffs = np.array(self.apriltag_config.get("distortion_coeffs", [0, 0, 0, 0, 0]), dtype=np.float32)
+
+        # Kamera kalibrasyonu
+        kamera_matrix_config = self.apriltag_config.get("kamera_matrix", [
+            [640.0, 0.0, 320.0],
+            [0.0, 640.0, 240.0],
+            [0.0, 0.0, 1.0]
+        ])
+        self.kamera_matrix = np.array(kamera_matrix_config, dtype=np.float32)
+        self.distortion_coeffs = np.array(
+            self.apriltag_config.get("distortion_coeffs", [0.0, 0.0, 0.0, 0.0, 0.0]),
+            dtype=np.float32
+        )
 
         # Tag boyutu (metre cinsinden)
         self.tag_boyutu = self.apriltag_config.get("tag_boyutu", 0.08)  # 8cm (küçük)
 
-        # Yaklaşım parametreleri
-        self.hedef_mesafe = sarj_config.get("hedef_mesafe", 0.25)  # 25cm
-        self.hassas_mesafe = sarj_config.get("hassas_mesafe", 0.08)  # 8cm
-        self.aci_toleransi = sarj_config.get("aci_toleransi", 5.0)  # 5 derece
-        self.pozisyon_toleransi = sarj_config.get("pozisyon_toleransi", 0.02)  # 2cm
+        # Yaklaşım parametreleri (yeni config yapısından al)
+        tolerances = self.apriltag_config.get("tolerances", {})
+        self.hedef_mesafe = tolerances.get("hedef_mesafe", sarj_config.get("hedef_mesafe", 0.25))  # 25cm
+        self.hassas_mesafe = tolerances.get("hassas_mesafe", sarj_config.get("hassas_mesafe", 0.08))  # 8cm
+        self.aci_toleransi = tolerances.get("aci_toleransi", sarj_config.get("aci_toleransi", 5.0))  # 5 derece
+        self.pozisyon_toleransi = tolerances.get("pozisyon_toleransi", sarj_config.get("pozisyon_toleransi", 0.02))  # 2cm
 
-        # Hız parametreleri
-        self.yaklasim_hizi = sarj_config.get("yaklasim_hizi", 0.1)  # 10 cm/s
-        self.hassas_hiz = sarj_config.get("hassas_hiz", 0.02)  # 2 cm/s
-        self.donme_hizi = sarj_config.get("donme_hizi", 0.2)  # 0.2 rad/s
+        # Hız parametreleri (yeni config yapısından al)
+        speeds = self.apriltag_config.get("speeds", {})
+        self.yaklasim_hizi = speeds.get("yaklasim_hizi", sarj_config.get("yaklasim_hizi", 0.1))  # 10 cm/s
+        self.hassas_hiz = speeds.get("hassas_hiz", sarj_config.get("hassas_hiz", 0.02))  # 2 cm/s
+        self.donme_hizi = speeds.get("donme_hizi", sarj_config.get("donme_hizi", 0.2))  # 0.2 rad/s
 
-        # INA219 güç sensörü
+        # INA219 güç sensörü (yeni config yapısından al)
+        power_sensor_config = sarj_config.get("power_sensor", {})
         self.ina219_aktif = False
-        self.sarj_akimi_esigi = sarj_config.get("sarj_akimi_esigi", 0.1)  # 100mA
-        self.baglanti_voltaj_esigi = sarj_config.get("baglanti_voltaj_esigi", 11.0)  # 11V
+        self.sarj_akimi_esigi = power_sensor_config.get("sarj_akimi_esigi", sarj_config.get("sarj_akimi_esigi", 0.1))  # 100mA
+        self.baglanti_voltaj_esigi = power_sensor_config.get("baglanti_voltaj_esigi", sarj_config.get("baglanti_voltaj_esigi", 11.0))  # 11V
 
-        # Durum takibi
-        self.mevcut_durum = SarjYaklasimDurumu.ARAMA
+        # Durum takibi - GPS varsa GPS navigasyondan başla
+        if self.rota_planlayici:
+            self.mevcut_durum = SarjYaklasimDurumu.GPS_NAVIGASYON
+        else:
+            self.mevcut_durum = SarjYaklasimDurumu.ARAMA
+
         self.son_tespit: Optional[AprilTagTespit] = None
         self.tespit_sayaci = 0
         self.hata_sayaci = 0
@@ -161,7 +199,7 @@ class SarjIstasyonuYaklasici:
 
     async def sarj_istasyonuna_yaklas(self, kamera_data: np.ndarray) -> Optional[SarjYaklasimKomutu]:
         """
-        🎯 Ana yaklaşım fonksiyonu
+        🎯 Ana yaklaşım fonksiyonu - GPS + AprilTag Hibrit Sistem
 
         Args:
             kamera_data: Kamera görüntüsü
@@ -170,8 +208,25 @@ class SarjIstasyonuYaklasici:
             Hareket komutu veya None (yaklaşım tamamlandı)
         """
         try:
-            # AprilTag tespit et
+            # GPS yaklaşımından AprilTag'e geçiş kontrolü
+            if self.mevcut_durum == SarjYaklasimDurumu.GPS_NAVIGASYON and self.konum_takipci:
+                mesafe_sarj_istasyonuna = self.konum_takipci.get_mesafe_to_gps(
+                    self.gps_dock_lat, self.gps_dock_lon
+                )
+
+                # AprilTag menzili içine girdiysek AprilTag moduna geç
+                if mesafe_sarj_istasyonuna <= self.apriltag_transition_distance:
+                    self.logger.info(f"🎯 GPS→AprilTag geçişi! Mesafe: {mesafe_sarj_istasyonuna:.2f}m")
+                    self.mevcut_durum = SarjYaklasimDurumu.ARAMA
+
+            # AprilTag tespit et (GPS modunda da kontrol et, erken geçiş için)
             tespit_sonucu = self._apriltag_tespit_et(kamera_data)
+
+            # Eğer AprilTag tespit edildiyse ve GPS modundaysak, direk AprilTag moduna geç
+            if (tespit_sonucu and tespit_sonucu.guven_skoru > 0.6 and
+                    self.mevcut_durum == SarjYaklasimDurumu.GPS_NAVIGASYON):
+                self.logger.info("🏷️ AprilTag erken tespit! GPS navigasyondan çıkılıyor")
+                self.mevcut_durum = SarjYaklasimDurumu.TESPIT
 
             # Durum makinesini işle
             return await self._durum_makinesini_isle(tespit_sonucu)
@@ -277,7 +332,10 @@ class SarjIstasyonuYaklasici:
     async def _durum_makinesini_isle(self, tespit: Optional[AprilTagTespit]) -> Optional[SarjYaklasimKomutu]:
         """Durum makinesini işle"""
 
-        if self.mevcut_durum == SarjYaklasimDurumu.ARAMA:
+        if self.mevcut_durum == SarjYaklasimDurumu.GPS_NAVIGASYON:
+            return await self._gps_navigasyon_durumu()
+
+        elif self.mevcut_durum == SarjYaklasimDurumu.ARAMA:
             return await self._arama_durumu(tespit)
 
         elif self.mevcut_durum == SarjYaklasimDurumu.TESPIT:
@@ -435,7 +493,7 @@ class SarjIstasyonuYaklasici:
 
     def get_yaklasim_durumu(self) -> Dict[str, Any]:
         """Yaklaşım durumu bilgisi"""
-        return {
+        durum_bilgisi = {
             "durum": self.mevcut_durum.value,
             "son_tespit": {
                 "mesafe": self.son_tespit.mesafe if self.son_tespit else None,
@@ -447,12 +505,138 @@ class SarjIstasyonuYaklasici:
             "ina219_aktif": self.ina219_aktif
         }
 
+        # GPS bilgilerini ekle
+        if self.rota_planlayici:
+            durum_bilgisi["gps_navigasyon"] = {
+                "aktif": True,
+                "hedef_lat": self.gps_dock_lat,
+                "hedef_lon": self.gps_dock_lon,
+                "waypoint_sayisi": len(self.gps_rotasi),
+                "mevcut_waypoint": self.rota_index,
+                "mesafe_kalan": self.konum_takipci.get_mesafe_to_gps(
+                    self.gps_dock_lat, self.gps_dock_lon
+                ) if self.konum_takipci else None
+            }
+        else:
+            durum_bilgisi["gps_navigasyon"] = {"aktif": False}
+
+        return durum_bilgisi
+
+    async def _gps_navigasyon_durumu(self) -> Optional[SarjYaklasimKomutu]:
+        """
+        🌍 GPS tabanlı navigasyon durumu
+
+        Bu metod robot'u GPS koordinatları kullanarak şarj istasyonuna yaklaştırır.
+        AprilTag menzili içine girdiğinde AprilTag moduna geçer.
+        """
+        if not self.rota_planlayici or not self.konum_takipci:
+            self.logger.error("❌ GPS navigasyon için rota planlayıcı veya konum takipçi eksik!")
+            self.mevcut_durum = SarjYaklasimDurumu.ARAMA
+            return None
+
+        try:
+            # GPS rotası henüz oluşturulmadıysa oluştur
+            if not self.gps_rotasi:
+                self.logger.info("🗺️ GPS şarj rotası oluşturuluyor...")
+
+                gps_rota = await self.rota_planlayici.sarj_istasyonu_rotasi(
+                    konum_takipci=self.konum_takipci,
+                    gps_dock_config=self.gps_dock_config
+                )
+
+                if gps_rota:
+                    self.gps_rotasi = gps_rota
+                    self.rota_index = 0
+                    self.logger.info(f"✅ GPS rotası oluşturuldu: {len(self.gps_rotasi)} waypoint")
+                else:
+                    self.logger.error("❌ GPS rotası oluşturulamadı!")
+                    self.mevcut_durum = SarjYaklasimDurumu.ARAMA
+                    return None
+
+            # Mevcut waypoint'i al
+            if self.rota_index >= len(self.gps_rotasi):
+                # Rota tamamlandı - AprilTag aramaya geç
+                self.logger.info("🎯 GPS rotası tamamlandı, AprilTag arama moduna geçiliyor")
+                self.mevcut_durum = SarjYaklasimDurumu.ARAMA
+                return None
+
+            # Mevcut hedef waypoint
+            hedef_waypoint = self.gps_rotasi[self.rota_index]
+            mevcut_konum = self.konum_takipci.get_mevcut_konum()
+
+            # Hedefe olan mesafe
+            hedef_mesafe = math.sqrt(
+                (hedef_waypoint.nokta.x - mevcut_konum.x) ** 2 +
+                (hedef_waypoint.nokta.y - mevcut_konum.y) ** 2
+            )
+
+            # Waypoint'e ulaştık mı? (2 metre tolerans - daha büyük)
+            if hedef_mesafe < 2.0:
+                self.rota_index += 1
+                self.logger.debug(f"📍 Waypoint {self.rota_index-1} tamamlandı, sonraki hedefe geçiliyor")
+
+                # Hemen sonraki waypoint'i kontrol et
+                if self.rota_index < len(self.gps_rotasi):
+                    hedef_waypoint = self.gps_rotasi[self.rota_index]
+
+            # Hareket komutunu oluştur
+            dx = hedef_waypoint.nokta.x - mevcut_konum.x
+            dy = hedef_waypoint.nokta.y - mevcut_konum.y
+
+            # Hedefe yön açısı
+            hedef_aci = math.atan2(dy, dx)
+            mevcut_aci = mevcut_konum.heading if hasattr(mevcut_konum, 'heading') else 0.0
+
+            # Açı farkı
+            aci_farki = hedef_aci - mevcut_aci
+
+            # Açıyı -π ile π arasında normalize et
+            while aci_farki > math.pi:
+                aci_farki -= 2 * math.pi
+            while aci_farki < -math.pi:
+                aci_farki += 2 * math.pi
+
+            # Hareket hızları - waypoint'ten değerleri al
+            linear_hiz = hedef_waypoint.hiz
+            angular_hiz = aci_farki * 0.5  # Proportional control
+
+            # Hızları sınırla
+            linear_hiz = max(0.0, min(0.3, linear_hiz))
+            angular_hiz = max(-0.5, min(0.5, angular_hiz))
+
+            self.logger.debug(
+                f"🧭 GPS navigasyon: waypoint {self.rota_index}/{len(self.gps_rotasi)}, "
+                f"mesafe: {hedef_mesafe:.2f}m, açı farkı: {math.degrees(aci_farki):.1f}°"
+            )
+
+            return SarjYaklasimKomutu(
+                linear_hiz=linear_hiz,
+                angular_hiz=angular_hiz,
+                sure=0.5,
+                hassas_mod=False
+            )
+
+        except Exception as e:
+            self.logger.error(f"❌ GPS navigasyon hatası: {e}")
+            self.mevcut_durum = SarjYaklasimDurumu.HATA
+            return None
+
     def sifirla(self):
         """Yaklaşım durumunu sıfırla"""
-        self.mevcut_durum = SarjYaklasimDurumu.ARAMA
+        # GPS modunu kullanıyorsak GPS'ten başla, değilse AprilTag'den
+        if self.rota_planlayici:
+            self.mevcut_durum = SarjYaklasimDurumu.GPS_NAVIGASYON
+        else:
+            self.mevcut_durum = SarjYaklasimDurumu.ARAMA
+
         self.son_tespit = None
         self.tespit_sayaci = 0
         self.hata_sayaci = 0
+
+        # GPS rotası sıfırla
+        self.gps_rotasi = []
+        self.rota_index = 0
+
         self.logger.info("🔄 Şarj yaklaşım durumu sıfırlandı")
 
     def __del__(self):

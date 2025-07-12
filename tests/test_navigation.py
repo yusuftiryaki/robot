@@ -16,7 +16,7 @@ import time
 import unittest
 from typing import List, Tuple
 
-from test_utils import TestRaporu, TestVeriUreticisi, TestYardimcilari
+from test_utils import TestRaporu, TestVeriUreticisi
 
 # Proje klasörünü Python path'ine ekle
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
@@ -59,8 +59,8 @@ class TestKonumTakibi(unittest.TestCase):
             return angle
 
         # Test açıları
-        test_angles = [0, math.pi/2, math.pi, 3 *
-                       math.pi/2, 2*math.pi, -math.pi/2, -math.pi]
+        test_angles = [0, math.pi / 2, math.pi, 3 *
+                       math.pi / 2, 2 * math.pi, -math.pi / 2, -math.pi]
 
         for angle in test_angles:
             normalized = normalize_angle(angle)

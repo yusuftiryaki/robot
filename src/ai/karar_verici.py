@@ -4,7 +4,18 @@ Hacı Abi'nin yapay zeka algoritması burada!
 
 Bu sınıf robot'un ne yapacağına karar verir:
 - Sensör verilerini analiz eder
-- Durum değerlendirmesi yapar
+- Duru        # IMU eğim kontrolü
+        imu_data = sensor_data.get("imu")
+        if imu_data and imu_data.gecerli:
+            roll = abs(imu_data.roll)
+            pitch = abs(imu_data.pitch)
+            max_egim = max(roll, pitch)
+
+            if max_egim > 25:  # 25 dereceden fazla eğim
+                return KararSonucu(
+                    hareket={"linear": 0.0, "angular": 0.0},
+                    oncelik=Oncelik.KRITIK,
+                    sebep=f"Kritik eğim tespit edildi: {max_egim:.1f}°",rmesi yapar
 - Optimal hareket stratejisi belirler
 - Acil durum yönetimi
 """
@@ -155,12 +166,12 @@ class KararVerici:
     async def _acil_durum_kontrol(self, sensor_data: Dict[str, Any]) -> Optional[KararSonucu]:
         """🚨 Acil durum analizi"""
         # Tampon sensörü kontrolü
-        tampon_data = sensor_data.get("tampon", {})
-        if tampon_data.get("front_bumper", False):
+        tampon_data = sensor_data.get("tampon")
+        if tampon_data and tampon_data.basildi:
             return KararSonucu(
                 hareket={"linear": 0.0, "angular": 0.0},
                 oncelik=Oncelik.KRITIK,
-                sebep="Ön tampon sensörü tetiklendi",
+                sebep="Tampon sensörü tetiklendi",
                 guven_skoru=1.0,
                 aksesuar_komutlari={"ana_firca": False, "yan_firca": False, "fan": False},
                 alternatif_eylemler=["geri_git", "saga_don", "sola_don"]
@@ -184,9 +195,9 @@ class KararVerici:
                 )
 
         # Düşük batarya acil durumu
-        batarya_data = sensor_data.get("batarya", {})
-        if batarya_data:
-            seviye = batarya_data.get("level", 50)
+        guc_data = sensor_data.get("guc")
+        if guc_data and guc_data.gecerli:
+            seviye = guc_data.batarya_seviyesi
             if seviye < 10:  # %10'un altında
                 return KararSonucu(
                     hareket={"linear": 0.0, "angular": 0.0},
@@ -275,8 +286,8 @@ class KararVerici:
     async def _gorev_analizi(self, sensor_data: Dict[str, Any], kamera_data: Dict[str, Any]) -> Optional[KararSonucu]:
         """🎯 Görev odaklı karar verme"""
         # Batarya seviyesi kontrolü
-        batarya_data = sensor_data.get("batarya", {})
-        batarya_seviye = batarya_data.get("level", 50) if batarya_data else 50
+        guc_data = sensor_data.get("guc")
+        batarya_seviye = guc_data.batarya_seviyesi if guc_data and guc_data.gecerli else 50
 
         # Düşük batarya - şarj istasyonu ara
         if batarya_seviye < 25:
